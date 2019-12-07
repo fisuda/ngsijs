@@ -266,10 +266,26 @@
             ENTITY_ATTR_VALUE_ENTRY: 'v2/entities/%(entityId)s/attrs/%(attribute)s/value',
             ENTITY_COLLECTION: 'v2/entities',
             ENTITY_ENTRY: 'v2/entities/%(entityId)s',
+            REGISTRATION_COLLECTION: 'v2/registrations',
+            REGISTRATION_ENTRY: 'v2/registrations/%(registrationId)s',
             SUBSCRIPTION_COLLECTION: 'v2/subscriptions',
             SUBSCRIPTION_ENTRY: 'v2/subscriptions/%(subscriptionId)s',
             TYPE_COLLECTION: 'v2/types',
             TYPE_ENTRY: 'v2/types/%(typeId)s'
+        },
+
+        ldv1: {
+            BATCH_QUERY_OP: 'ngsi-ld/v1/op/query',
+            BATCH_UPDATE_OP: 'ngsi-ld/v1/op/update',
+            ENTITY_ATTRS_COLLECTION: 'ngsi-ld/v1/entities/%(entityId)s/attrs',
+            ENTITY_ATTR_ENTRY: 'ngsi-ld/v1/entities/%(entityId)s/attrs/%(attribute)s',
+            ENTITY_ATTR_VALUE_ENTRY: 'ngsi-ld/v1/entities/%(entityId)s/attrs/%(attribute)s/value',
+            ENTITY_COLLECTION: 'ngsi-ld/v1/entities',
+            ENTITY_ENTRY: 'ngsi-ld/v1/entities/%(entityId)s',
+            REGISTRATION_COLLECTION: 'ngsi-ld/v1/registrations',
+            REGISTRATION_ENTRY: 'ngsi-ld/v1/registrations/%(registrationId)s',
+            SUBSCRIPTION_COLLECTION: 'ngsi-ld/v1/subscriptions',
+            SUBSCRIPTION_ENTRY: 'ngsi-ld/v1/subscriptions/%(subscriptionId)s'
         }
     };
 
@@ -380,6 +396,40 @@
 
         var requestHeaders = JSON.parse(JSON.stringify(this.headers));
         requestHeaders.Accept = 'application/json';
+
+        for (var headerName in options.requestHeaders) {
+            if (options.requestHeaders[headerName] != null) {
+                deleteHeader(headerName, requestHeaders);
+                requestHeaders[headerName] = options.requestHeaders[headerName];
+            }
+        }
+        options.requestHeaders = requestHeaders;
+
+        return this.makeRequest(url, options).then(
+            function (response) {
+                if ([0, 502, 504].indexOf(response.status) !== -1) {
+                    return Promise.reject(new NGSI.ConnectionError());
+                }
+                return Promise.resolve(response);
+            },
+            function (error) {
+                // Allow to customize error details by "backends"
+                if (!(error instanceof NGSI.ConnectionError)) {
+                    error = new NGSI.ConnectionError();
+                }
+                return Promise.reject(error);
+            }
+        );
+    };
+
+    var makeJSONRequest3 = function makeJSONRequest3(url, options) {
+        if (options.postBody != null) {
+            options.contentType = 'application/ld+json';
+            options.postBody = JSON.stringify(options.postBody);
+        }
+
+        var requestHeaders = JSON.parse(JSON.stringify(this.headers));
+        requestHeaders.Accept = 'application/json;application/ld+json';
 
         for (var headerName in options.requestHeaders) {
             if (options.requestHeaders[headerName] != null) {
@@ -1820,7 +1870,8 @@
         Object.defineProperties(this, {
             url: {value: url},
             v1: {value: this},
-            v2: {value: new NGSI.Connection.V2(this)}
+            v2: {value: new NGSI.Connection.V2(this)},
+            ldv1: {value: new NGSI.Connection.LDV1(this)}
         });
     };
 
@@ -5279,6 +5330,468 @@
     };
 
     /**
+     * Retrieves the available registrations (using pagination).
+     *
+     * > This method uses v2 of the FIWARE's NGSI Specification
+     *
+     * @since 1.3.0
+     *
+     * @name NGSI.Connection#v2.listRegistrations
+     * @method "v2.listRegistrations"
+     * @memberof NGSI.Connection
+     *
+     * @param {Object} [options]
+     *
+     * Object with extra options:
+     *
+     * - `correlator` (`String`): Transaction id
+     * - `count` (`Boolean`; default: `false`): request total count
+     * - `limit` (`Number`; default: `20`): This option allow you to specify
+     *   the maximum number of registrations you want to receive from the
+     *   server
+     * - `offset` (`Number`; default: `0`): Allows you to skip a given
+     *   number of elements at the beginning
+     * - `service` (`String`): Service/tenant to use in this operation
+     * - `servicepath` (`String`): Service path to use in this operation
+     *
+     * @throws {NGSI.ConnectionError}
+     * @throws {NGSI.InvalidResponseError}
+     *
+     * @returns {Promise}
+     *
+     * @example <caption>Retrieve first 20 registrations from the Context Broker</caption>
+     *
+     * connection.v2.listRegistrations().then(
+     *     (response) => {
+     *         // Registrations retrieved successfully
+     *         // response.results is an array with the retrieved registrations
+     *     }, (error) => {
+     *         // Error retrieving registrations
+     *         // If the error was reported by Orion, error.correlator will be
+     *         // filled with the associated transaction id
+     *     }
+     * );
+     *
+     * @example <caption>Retrieve second page from the Context Broker requesting pagination details</caption>
+     *
+     * connection.v2.listRegistrations({offset: 20, count: true}).then(
+     *     (response) => {
+     *         // Registrations retrieved successfully
+     *         // response.correlator transaction id associated with the server response
+     *         // response.limit contains the used page size
+     *         // response.results is an array with the retrieved registrations
+     *         // response.count contains the number of available registrations
+     *         // response.offset contains the offset used in the request
+     *     }, (error) => {
+     *         // Error retrieving registrations
+     *         // If the error was reported by Orion, error.correlator will be
+     *         // filled with the associated transaction id
+     *     }
+     * );
+     *
+     */
+    NGSI.Connection.V2.prototype.listRegistrations = function listRegistrations(options) {
+        if (options == null) {
+            options = {};
+        }
+
+        var connection = privates.get(this);
+        var url = new URL(NGSI.endpoints.v2.REGISTRATION_COLLECTION, connection.url);
+        var optionsparams = [];
+        var parameters = parse_pagination_options2(options, optionsparams);
+
+        if (optionsparams.length !== 0) {
+            parameters.options = optionsparams.join(',');
+        }
+
+        return makeJSONRequest2.call(connection, url, {
+            method: "GET",
+            parameters: parameters,
+            requestHeaders: {
+                "FIWARE-Correlator": options.correlator,
+                "FIWARE-Service": options.service,
+                "FIWARE-ServicePath": options.servicepath
+            }
+        }).then(function (response) {
+            var correlator = response.getHeader('Fiware-correlator');
+            if (response.status !== 200) {
+                return Promise.reject(new NGSI.InvalidResponseError('Unexpected error code: ' + response.status, correlator));
+            }
+
+            var result = {
+                correlator: correlator,
+                limit: options.limit,
+                offset: options.offset,
+                results: JSON.parse(response.responseText),
+            };
+            if (options.count === true) {
+                result.count = parseInt(response.getHeader("Fiware-Total-Count"), 10);
+            }
+
+            return Promise.resolve(result);
+        });
+    };
+
+    /**
+     * Creates a new registration.
+     *
+     * > This method uses v2 of the FIWARE's NGSI Specification
+     *
+     * @since 1.3.0
+     *
+     * @name NGSI.Connection#v2.createRegistration
+     * @method "v2.createRegistration"
+     * @memberof NGSI.Connection
+     *
+     * @param {Object}
+     *
+     * registration values to be used for creating it
+     *
+     * @param {Object} [options]
+     *
+     * Object with extra options:
+     * - `correlator` (`String`): Transaction id
+     * - `service` (`String`): Service/tenant to use in this operation
+     * - `servicepath` (`String`): Service path to use in this operation
+     *
+     * @throws {NGSI.BadRequestError}
+     * @throws {NGSI.ConnectionError}
+     * @throws {NGSI.InvalidResponseError}
+     *
+     * @returns {Promise}
+     *
+     * @example <caption>Basic usage</caption>
+     *
+     * connection.v2.createRegistration({
+     *    "description": "One registration to rule them all",
+     *    "dataProvided": {
+     *      "entities": [
+     *        {
+     *          "id": "room1",
+     *          "type": "Room"
+     *        }
+     *      ],
+     *      "attrs": [
+     *        "temperature",
+     *        "humidity"
+     *      ]
+     *    },
+     *    "provider": {
+     *      "http": {
+     *        "url": "http://localhost:1234"
+     *      },
+     *      "legacyForwarding": true,
+     *      "supportedForwardingMode": "all"
+     *    }
+     * }).then(
+     *     (response) => {
+     *         // Registration created successfully
+     *         // response.correlator transaction id associated with the server response
+     *     }, (error) => {
+     *         // Error creating the registration
+     *         // If the error was reported by Orion, error.correlator will be
+     *         // filled with the associated transaction id
+     *     }
+     * );
+     *
+     */
+    NGSI.Connection.V2.prototype.createRegistration = function createRegistration(registration, options) {
+        if (options == null) {
+            options = {};
+        }
+
+        if (typeof registration !== 'object' || Array.isArray(registration)) {
+            throw new TypeError('invalid registration parameter');
+        }
+
+        var connection = privates.get(this);
+        var url = new URL(NGSI.endpoints.v2.REGISTRATION_COLLECTION, connection.url);
+
+        return makeJSONRequest2.call(connection, url, {
+            method: "POST",
+            postBody: registration,
+            requestHeaders: {
+                "FIWARE-Correlator": options.correlator,
+                "FIWARE-Service": options.service,
+                "FIWARE-ServicePath": options.servicepath
+            }
+        }).then(function (response) {
+            var correlator = response.getHeader('Fiware-correlator');
+            if (response.status === 400) {
+                return parse_bad_request(response, correlator);
+            } else if (response.status !== 201) {
+                return Promise.reject(new NGSI.InvalidResponseError('Unexpected error code: ' + response.status, correlator));
+            }
+
+            var location_header = response.getHeader('Location');
+            try {
+                var registration_url = new URL(location_header, connection.url);
+                var registration_id = registration_url.pathname.split('/').pop();
+                registration.id = registration_id;
+            } catch (e) {
+                return Promise.reject(new NGSI.InvalidResponseError('Unexpected location header: ' + location_header, correlator));
+            }
+
+            return Promise.resolve({
+                correlator: correlator,
+                registration: registration,
+                location: location_header
+            });
+        });
+    };
+
+    /**
+     * Gets all the details of a registration.
+     *
+     * > This method uses v2 of the FIWARE's NGSI Specification
+     *
+     * @since 1.3.0
+     *
+     * @name NGSI.Connection#v2.getRegistration
+     * @method "v2.getRegistration"
+     * @memberof NGSI.Connection
+     *
+     * @param {String|Object} options
+     *
+     * Object with extra options:
+     *
+     * - `correlator` (`String`): Transaction id
+     * - `service` (`String`): Service/tenant to use in this operation
+     * - `servicepath` (`String`): Service path to use in this operation
+     *
+     * @throws {NGSI.ConnectionError}
+     * @throws {NGSI.InvalidResponseError}
+     * @throws {NGSI.NotFoundError}
+     *
+     * @returns {Promise}
+     *
+     * @example <caption>Basic usage</caption>
+     *
+     * connection.v2.getRegistration("abcdef").then(
+     *     (response) => {
+     *         // Registration details retrieved successfully
+     *         // response.registration registration details
+     *         // response.correlator transaction id associated with the server response
+     *     }, (error) => {
+     *         // Error retrieving registration
+     *         // If the error was reported by Orion, error.correlator will be
+     *         // filled with the associated transaction id
+     *     }
+     * );
+     *
+     */
+    NGSI.Connection.V2.prototype.getRegistration = function getRegistration(options) {
+        if (options == null) {
+            throw new TypeError("missing options parameter");
+        }
+
+        if (typeof options === "string") {
+            options = {
+                id: options
+            };
+        }
+
+        var connection = privates.get(this);
+        var url = new URL(interpolate(NGSI.endpoints.v2.REGISTRATION_ENTRY, {registrationId: encodeURIComponent(options.id)}), connection.url);
+
+        return makeJSONRequest2.call(connection, url, {
+            method: "GET",
+            requestHeaders: {
+                "FIWARE-Correlator": options.correlator,
+                "FIWARE-Service": options.service,
+                "FIWARE-ServicePath": options.servicepath
+            }
+        }).then(function (response) {
+            var correlator = response.getHeader('Fiware-correlator');
+            if (response.status === 404) {
+                return parse_not_found_response(response, correlator);
+            } else if (response.status !== 200) {
+                return Promise.reject(new NGSI.InvalidResponseError('Unexpected error code: ' + response.status, correlator));
+            }
+            try {
+                var data = JSON.parse(response.responseText);
+            } catch (e) {
+                throw new NGSI.InvalidResponseError('Server returned invalid JSON content', correlator);
+            }
+            return Promise.resolve({
+                correlator: correlator,
+                registration: data
+            });
+        });
+    };
+
+    /**
+     * Updates a registration.
+     *
+     * > This method uses v2 of the FIWARE's NGSI Specification
+     *
+     * @since 1.3.0
+     *
+     * @name NGSI.Connection#v2.updateRegistration
+     * @method "v2.updateRegistration"
+     * @memberof NGSI.Connection
+     *
+     * @param {Object} changes
+     * @param {Object} [options]
+     *
+     * Object with extra options:
+     *
+     * - `correlator` (`String`): Transaction id
+     * - `service` (`String`): Service/tenant to use in this operation
+     * - `servicepath` (`String`): Service path to use in this operation
+     *
+     * @throws {NGSI.ConnectionError}
+     * @throws {NGSI.InvalidResponseError}
+     * @throws {NGSI.NotFoundError}
+     *
+     * @returns {Promise}
+     *
+     * @example <caption>Update registration expiration time</caption>
+     *
+     * connection.v2.updateRegistration({
+     *     "id": "abcdef",
+     *     "description": "Context Source"
+     * }).then(
+     *     (response) => {
+     *         // Registration updated successfully
+     *         // response.correlator transaction id associated with the server response
+     *     }, (error) => {
+     *         // Error updating registration
+     *         // If the error was reported by Orion, error.correlator will be
+     *         // filled with the associated transaction id
+     *     }
+     * );
+     *
+     * @example <caption>Use a custom service path for the update operation</caption>
+     *
+     * connection.v2.updateRegistration({
+     *     "id": "abcdef",
+     *     "description": "Context Source"
+     * }, {
+     *     servicepath: "/Spain/Madrid"
+     * }).then(
+     *     (response) => {
+     *         // Registration updated successfully
+     *         // response.correlator transaction id associated with the server response
+     *     }, (error) => {
+     *         // Error updating registration
+     *         // If the error was reported by Orion, error.correlator will be
+     *         // filled with the associated transaction id
+     *     }
+     * );
+     *
+     * Note: PATCH /v2/registration/<id> is not implemented in FIWARE Orion 2.3
+     *       See https://fiware-orion.readthedocs.io/en/master/user/ngsiv2_implementation_notes/index.html#registrations,
+     *           https://github.com/telefonicaid/fiware-orion/issues/3007
+     *
+     */
+    NGSI.Connection.V2.prototype.updateRegistration = function updateRegistration(changes, options) {
+        if (options == null) {
+            options = {};
+        }
+
+        var connection = privates.get(this);
+        var url = new URL(interpolate(NGSI.endpoints.v2.REGISTRATION_ENTRY, {registrationId: encodeURIComponent(changes.id)}), connection.url);
+
+        // Remove id from the payload
+        delete changes.id;
+
+        return makeJSONRequest2.call(connection, url, {
+            method: "PATCH",
+            postBody: changes,
+            requestHeaders: {
+                "FIWARE-Correlator": options.correlator,
+                "FIWARE-Service": options.service,
+                "FIWARE-ServicePath": options.servicepath
+            }
+        }).then(function (response) {
+            var correlator = response.getHeader('Fiware-correlator');
+            if (response.status === 404) {
+                return parse_not_found_response(response, correlator);
+            } else if (response.status !== 204) {
+                return Promise.reject(new NGSI.InvalidResponseError('Unexpected error code: ' + response.status, correlator));
+            }
+            return Promise.resolve({
+                correlator: correlator
+            });
+        });
+    };
+
+    /**
+     * Removes a registration from the orion context broker server.
+     *
+     * > This method uses v2 of the FIWARE's NGSI Specification
+     *
+     * @since 1.3.0
+     *
+     * @name NGSI.Connection#v2.deleteRegistration
+     * @method "v2.deleteRegistration"
+     * @memberof NGSI.Connection
+     *
+     * @param {String|Object} options
+     *
+     * String with the id of the registration to remove or an object with
+     * options:
+     *
+     * - `correlator` (`String`): Transaction id
+     * - `id` (`String`): Id of the registration to remove
+     * - `service` (`String`): Service/tenant to use in this operation
+     * - `servicepath` (`String`): Service path to use in this operation
+     *
+     * @throws {NGSI.ConnectionError}
+     * @throws {NGSI.InvalidResponseError}
+     * @throws {NGSI.NotFoundError}
+     *
+     * @returns {Promise}
+     *
+     * @example
+     *
+     * connection.v2.deleteRegistration("57f7787a5f817988e4eb3dda").then(
+     *     (response) => {
+     *         // Registration deleted successfully
+     *         // response.correlator transaction id associated with the server response
+     *     }, (error) => {
+     *         // Error deleting registration
+     *         // If the error was reported by Orion, error.correlator will be
+     *         // filled with the associated transaction id
+     *     }
+     * );
+     */
+    NGSI.Connection.V2.prototype.deleteRegistration = function deleteRegistration(options) {
+        if (options == null) {
+            throw new TypeError("missing options parameter");
+        }
+
+        if (typeof options === "string") {
+            options = {
+                id: options
+            };
+        }
+
+        var connection = privates.get(this);
+        var url = new URL(interpolate(NGSI.endpoints.v2.REGISTRATION_ENTRY, {registrationId: encodeURIComponent(options.id)}), connection.url);
+
+        return makeJSONRequest2.call(connection, url, {
+            method: "DELETE",
+            requestHeaders: {
+                "FIWARE-Correlator": options.correlator,
+                "FIWARE-Service": options.service,
+                "FIWARE-ServicePath": options.servicepath
+            }
+        }).then(function (response) {
+            var correlator = response.getHeader('Fiware-correlator');
+            if (response.status === 404) {
+                return parse_not_found_response(response, correlator);
+            } else if (response.status !== 204) {
+                return Promise.reject(new NGSI.InvalidResponseError('Unexpected error code: ' + response.status, correlator));
+            }
+            return Promise.resolve({
+                correlator: correlator
+            });
+        });
+    };
+
+    /**
      * This operation allows to create, update and/or delete several entities
      * in a single batch operation.
      *
@@ -5500,6 +6013,2963 @@
         parameters.orderBy = options.orderBy;
 
         return makeJSONRequest2.call(connection, url, {
+            method: "POST",
+            parameters: parameters,
+            postBody: query,
+            requestHeaders: {
+                "FIWARE-Correlator": options.correlator,
+                "FIWARE-Service": options.service,
+                "FIWARE-ServicePath": options.servicepath
+            }
+        }).then(function (response) {
+            var correlator = response.getHeader('Fiware-correlator');
+            if (response.status === 400) {
+                return parse_bad_request(response, correlator);
+            } else if (response.status !== 200) {
+                return Promise.reject(new NGSI.InvalidResponseError('Unexpected error code: ' + response.status, correlator));
+            }
+
+            try {
+                var data = JSON.parse(response.responseText);
+            } catch (e) {
+                return Promise.reject(new NGSI.InvalidResponseError('Server returned invalid JSON content', correlator));
+            }
+
+            var result = {
+                correlator: correlator,
+                limit: options.limit,
+                offset: options.offset,
+                results: data
+            };
+            if (options.count === true) {
+                result.count = parseInt(response.getHeader("Fiware-Total-Count"), 10);
+            }
+
+            return Promise.resolve(result);
+        });
+    };
+
+    NGSI.Connection.LDV1 = function LDV1(connection) {
+        privates.set(this, connection);
+    };
+
+    /**
+     * Retrieves the available entities using pagination.
+     *
+     * > This method uses NGSI-LD API of ETSI ISG CIM
+     *
+     * @since 1.4.0
+     *
+     * @name NGSI.Connection#ldv1.listEntities
+     * @method "ldv1.listEntities"
+     * @memberof NGSI.Connection
+     *
+     * @param {Object} [options]
+     *
+     * Object with extra options:
+     *
+     * - `id` (`String`): A comma-separated list of entity ids to retrieve.
+     * - `idPattern` (`String`): A correctly formated regular expression.
+     *   Retrieve entities whose ID matches the regular expression. Incompatible
+     *   with the `id` option
+     * - `type` (`String`): A comma-separated list of entity types to retrieve.
+     * - `attrs` (`String`): Comma-separated list of attribute names whose data
+     *   are to be included in the response. The attributes are retrieved in the
+     *   order specified by this parameter. If this parameter is not included,
+     *   the attributes are retrieved in arbitrary order.
+     * - `q` (`String`): A query expression, composed of a list of statements
+     *   separated by semicolons (`;`)
+     * - `georel` (`String`): Spatial relationship between matching entities and
+     * - `geometry` (`String`): Geographical area to which the query is restricted.
+     *   See "Geographical Queries" section in NGSI-LD specification for details.
+     * - `coords` (`String`): List of latitude-longitude pairs of coordinates
+     *   separated by ';'. See "Geographical Queries" section in NGSI-LD specification
+     *   for details.
+     * - `geoproperty` (`String`): The name of the property that contains the
+     *   geo-spatial data that will be used to resolve the geoquery
+     * - `csf` (`String`): Context Source Filter
+     * - `limit` (`Number`; default: `20`): This option allow you to specify
+     * - 'options' (`String`): Options dictionary
+     * - `correlator` (`String`): Transaction id
+     * - `count` (`Boolean`; default: `false`): Request total count
+     *   Incompatible with the `idPattern` option.
+     *   the maximum number of entities you want to receive from the server
+     * - `offset` (`Number`; default: `0`): Allows you to skip a given number of
+     *   elements at the beginning
+     * - `orderBy` (`String`): Criteria for ordering results
+     *   a reference shape. See "Geographical Queries" section in NGSI-LD specification
+     *   for details.
+     * - `service` (`String`): Service/tenant to use in this operation
+     * - `servicepath` (`String`): Service path to use in this operation
+     *   Incompatible with the `typePattern` option.
+     * - `typePattern` (`String`): A correctly formated regular expression.
+     *   Retrieve entities whose type matches the regular expression.
+     *   Incompatible with the `type` option.
+     * - `unique` (`Boolean`): Represent entities as an array of non-repeated
+     *   attribute values.
+     * - `values` (`Boolean`): Represent entities as an array of attribute
+     *   values
+     * - `metadata` (`String`): A comma-separated list of metadata names to
+     *   include in the response
+     * - `mq` (`String`): A query expression for attribute metadata, composed of
+     *   a list of statements separated by semicolons (`;`)
+     *
+     * @throws {NGSI.ConnectionError}
+     * @throws {NGSI.InvalidResponseError}
+     *
+     * @returns {Promise}
+     *
+     * @example <caption>Retrieve first 20 entities from the Context Broker</caption>
+     *
+     * connection.ldv1.listEntities().then(
+     *     (response) => {
+     *         // Entities retrieved successfully
+     *         // response.correlator transaction id associated with the server response
+     *         // response.limit contains the used page size
+     *         // response.results is an array with the retrieved entities
+     *         // response.offset contains the offset used in the request
+     *     }, (error) => {
+     *         // Error retrieving entities
+     *         // If the error was reported by Orion, error.correlator will be
+     *         // filled with the associated transaction id
+     *     }
+     * );
+     *
+     * @example <caption>Retrieve second page from the Context Broker requesting pagination details</caption>
+     *
+     * connection.ldv1.listEntities({offset: 20, count: true}).then(
+     *     (response) => {
+     *         // Entities retrieved successfully
+     *         // response.results is an array with the retrieved entities
+     *         // response.correlator transaction id associated with the server response
+     *         // response.count contains the total number of entities selected
+     *         //   by this query
+     *         // response.offset contains the offset used in the request
+     *     }, (error) => {
+     *         // Error retrieving entities
+     *         // If the error was reported by Orion, error.correlator will be
+     *         // filled with the associated transaction id
+     *     }
+     * );
+     */
+    NGSI.Connection.LDV1.prototype.listEntities = function listEntities(options) {
+        if (options == null) {
+            options = {};
+        }
+
+        if (options.id != null && options.idPattern != null) {
+            throw new TypeError('id and idPattern options cannot be used at the same time');
+        }
+
+        if (options.type != null && options.typePattern != null) {
+            throw new TypeError('type and typePattern options cannot be used at the same time');
+        }
+
+        var connection = privates.get(this);
+        var url = new URL(NGSI.endpoints.ldv1.ENTITY_COLLECTION, connection.url);
+        var optionsparams = [];
+        var parameters = parse_pagination_options2(options, optionsparams);
+
+        if (options.keyValues === true) {
+            optionsparams.push("keyValues");
+        }
+        if (options.values === true) {
+            optionsparams.push("values");
+        }
+        if (options.unique === true) {
+            optionsparams.push("unique");
+        }
+        if (optionsparams.length !== 0) {
+            parameters.options = optionsparams.join(',');
+        }
+
+        parameters.id = options.id;
+        parameters.idPattern = options.idPattern;
+        parameters.type = options.type;
+        parameters.attrs = options.attrs;
+        parameters.q = options.q;
+        parameters.georel = options.georel;
+        parameters.geometry = options.geometry;
+        parameters.coords = options.coords;
+        parameters.geoproperty = options.geoproperty;
+        parameters.csf = options.csf;
+        parameters.options = options.options;
+
+        parameters.orderBy = options.orderBy;
+        parameters.metadata = options.metadata;
+        parameters.mq = options.mq;
+        parameters.typePattern = options.typePattern;
+
+        return makeJSONRequest3.call(connection, url, {
+            method: "GET",
+            parameters: parameters,
+            requestHeaders: {
+                "FIWARE-Correlator": options.correlator,
+                "FIWARE-Service": options.service,
+                "FIWARE-ServicePath": options.servicepath
+            }
+        }).then(function (response) {
+            var correlator = response.getHeader('Fiware-correlator');
+
+            if (response.status !== 200) {
+                return Promise.reject(new NGSI.InvalidResponseError('Unexpected error code: ' + response.status, correlator));
+            }
+
+            try {
+                var data = JSON.parse(response.responseText);
+            } catch (e) {
+                return Promise.reject(new NGSI.InvalidResponseError('Server returned invalid JSON content', correlator));
+            }
+
+            var result = {
+                results: data,
+                limit: options.limit,
+                offset: options.offset,
+                correlator: correlator
+            };
+            if (options.count === true) {
+                result.count = parseInt(response.getHeader("Fiware-Total-Count"), 10);
+            }
+
+            return Promise.resolve(result);
+        });
+    };
+
+    /**
+     * Creates a new entity.
+     *
+     * > This method uses NGSI-LD API of ETSI ISG CIM
+     *
+     * @since 1.4.0
+     *
+     * @name NGSI.Connection#ldv1.createEntity
+     * @method "ldv1.createEntity"
+     * @memberof NGSI.Connection
+     *
+     * @param {Object}
+     *
+     * entity values to be used for creating the new entity. Requires at least
+     * the `id` value for the new entity.
+     *
+     * @param {Object} [options]
+     *
+     * Object with extra options:
+     *
+     * - `correlator` (`String`): Transaction id
+     * - `keyValues` (`Boolean`; default: `false`): Use flat attributes
+     * - `service` (`String`): Service/tenant to use in this operation
+     * - `servicepath` (`String`): Service path to use in this operation
+     * - `upsert` (`Boolean`; default: `false`): If `true`, entity is
+     *   updated if already exits. If `upsert` is `false` this operation
+     *   will fail if the entity already exists.
+     *
+     *
+     * @throws {NGSI.AlreadyExistsError}
+     * @throws {NGSI.BadRequestError}
+     * @throws {NGSI.ConnectionError}
+     * @throws {NGSI.InvalidResponseError}
+     *
+     * @returns {Promise}
+     *
+     * @example <caption>Basic usage</caption>
+     *
+     * connection.ldv1.createEntity({
+     *     "id": "Spain-Road-A62",
+     *     "type": "Road",
+     *     "name": {"value": "A-62"},
+     *     "alternateName": {"value": "E-80"},
+     *     "description": {"value": "Autovía de Castilla"},
+     *     "roadClass": {"value": "motorway"},
+     *     "length": {"value": 355},
+     *     "refRoadSegment": {
+     *         "value": [
+     *             "Spain-RoadSegment-A62-0-355-forwards",
+     *             "Spain-RoadSegment-A62-0-355-backwards"
+     *         ]
+     *      },
+     *     "responsible": {"value": "Ministerio de Fomento - Gobierno de España"}
+     * }).then(
+     *     (response) => {
+     *         // Entity created successfully
+     *         // response.correlator transaction id associated with the server response
+     *     }, (error) => {
+     *         // Error creating the entity
+     *         // If the error was reported by Orion, error.correlator will be
+     *         // filled with the associated transaction id
+     *     }
+     * );
+     *
+     * @example <caption>Using the keyValues option</caption>
+     *
+     * connection.ldv1.createEntity({
+     *     "id": "Spain-Road-A62",
+     *     "type": "Road",
+     *     "name": "A-62",
+     *     "alternateName": "E-80",
+     *     "description": "Autovía de Castilla",
+     *     "roadClass": "motorway",
+     *     "length": 355,
+     *     "refRoadSegment": [
+     *         "Spain-RoadSegment-A62-0-355-forwards",
+     *         "Spain-RoadSegment-A62-0-355-backwards"
+     *     ],
+     *     "responsible": "Ministerio de Fomento - Gobierno de España"
+     * }, {keyValues: true}).then(
+     *     (response) => {
+     *         // Entity created successfully
+     *         // response.correlator transaction id associated with the server response
+     *     }, (error) => {
+     *         // Error creating the entity
+     *         // If the error was reported by Orion, error.correlator will be
+     *         // filled with the associated transaction id
+     *     }
+     * );
+     *
+     */
+    NGSI.Connection.LDV1.prototype.createEntity = function createEntity(entity, options) {
+        if (options == null) {
+            options = {};
+        }
+
+        if (entity.id == null) {
+            throw new TypeError('missing entity id');
+        }
+
+        var connection = privates.get(this);
+        var parameters = {};
+
+        if (options.keyValues === true && options.upsert === true) {
+            parameters.options = "keyValues,upsert";
+        } else if (options.upsert === true) {
+            parameters.options = "upsert";
+        } else if (options.keyValues === true) {
+            parameters.options = "keyValues";
+        }
+
+        var url = new URL(NGSI.endpoints.ldv1.ENTITY_COLLECTION, connection.url);
+        return makeJSONRequest3.call(connection, url, {
+            method: "POST",
+            postBody: entity,
+            parameters: parameters,
+            requestHeaders: {
+                "FIWARE-Correlator": options.correlator,
+                "FIWARE-Service": options.service,
+                "FIWARE-ServicePath": options.servicepath
+            }
+        }).then(function (response) {
+            var correlator = response.getHeader('Fiware-correlator');
+            if (response.status === 400) {
+                return parse_bad_request(response, correlator);
+            } else if (options.upsert !== true && response.status === 422) {
+                return Promise.reject(new NGSI.AlreadyExistsError({correlator: correlator}));
+            } else if ((options.upsert !== true && response.status !== 201) || (options.upsert === true && [201, 204].indexOf(response.status) === -1)) {
+                return Promise.reject(new NGSI.InvalidResponseError('Unexpected error code: ' + response.status, correlator));
+            }
+            return Promise.resolve({
+                correlator: correlator,
+                entity: entity,
+                location: response.getHeader('Location')
+            });
+        });
+    };
+
+    /**
+     * Gets all the details of an entity.
+     *
+     * > This method uses NGSI-LD API of ETSI ISG CIM
+     *
+     * @since 1.4.0
+     *
+     * @name NGSI.Connection#ldv1.getEntity
+     * @method "ldv1.getEntity"
+     * @memberof NGSI.Connection
+     *
+     * @param {String|Object} options
+     *
+     * String with the id of the entity to query or an object with extra
+     * options:
+     *
+     * - `attrs` (`String`): Comma separated list of attribute names
+         (properties or relationships) to be retrieved
+     * - `correlator` (`String`): Transaction id
+     * - `id` (`String`, required): Id of the entity to query
+     * - `keyValues` (`Boolean`; default: `false`): Use flat attributes
+     * - `options` (`String`): Options dictionary
+     * - `service` (`String`): Service/tenant to use in this operation
+     * - `servicepath` (`String`): Service path to use in this operation
+     * - `type` (`String`): Entity type, to avoid ambiguity in case there are
+     *   several entities with the same entity id.
+     *
+     * @throws {NGSI.ConnectionError}
+     * @throws {NGSI.InvalidResponseError}
+     * @throws {NGSI.NotFoundError}
+     * @throws {NGSI.TooManyResultsError}
+     *
+     * @returns {Promise}
+     *
+     * @example <caption>Basic usage</caption>
+     *
+     * connection.ldv1.getEntity("Spain-Road-A62").then(
+     *     (response) => {
+     *         // Entity details retrieved successfully
+     *         // response.entity entity details
+     *         // response.correlator transaction id associated with the server response
+     *     }, (error) => {
+     *         // Error retrieving entity
+     *         // If the error was reported by Orion, error.correlator will be
+     *         // filled with the associated transaction id
+     *     }
+     * );
+     *
+     * @example <caption>Retrieve a typed entity and using the keyValues option</caption>
+     *
+     * connection.ldv1.getEntity({
+     *     id: "Spain-Road-A62",
+     *     type: "Road",
+     *     keyValues: true
+     * }).then(
+     *     (response) => {
+     *         // Entity details retrieved successfully
+     *         // response.entity entity details
+     *         // response.correlator transaction id associated with the server response
+     *     }, (error) => {
+     *         // Error retrieving entity
+     *         // If the error was reported by Orion, error.correlator will be
+     *         // filled with the associated transaction id
+     *     }
+     * );
+     *
+     */
+    NGSI.Connection.LDV1.prototype.getEntity = function getEntity(options) {
+        if (options == null) {
+            throw new TypeError("missing options parameter");
+        }
+
+        if (typeof options === "string") {
+            options = {
+                id: options
+            };
+        } else if (options.id == null) {
+            throw new TypeError("missing id option");
+        }
+
+        var connection = privates.get(this);
+        var url = new URL(interpolate(NGSI.endpoints.ldv1.ENTITY_ENTRY, {entityId: encodeURIComponent(options.id)}), connection.url);
+        var parameters = {};
+        if (options.attrs != null) {
+            parameters.attrs = options.attrs;
+        }
+        if (options.type != null) {
+            parameters.type = options.type;
+        }
+        if (options.options != null) {
+            parameters.options = options.options;
+        }
+
+        if (options.keyValues === true) {
+            parameters.options = "keyValues";
+        }
+
+        return makeJSONRequest3.call(connection, url, {
+            method: "GET",
+            parameters: parameters,
+            requestHeaders: {
+                "FIWARE-Correlator": options.correlator,
+                "FIWARE-Service": options.service,
+                "FIWARE-ServicePath": options.servicepath
+            }
+        }).then(function (response) {
+            var correlator = response.getHeader('Fiware-correlator');
+            if (response.status === 409) {
+                return parse_too_many_results(response, correlator);
+            } else if (response.status === 404) {
+                return parse_not_found_response(response, correlator);
+            } else if (response.status !== 200) {
+                return Promise.reject(new NGSI.InvalidResponseError('Unexpected error code: ' + response.status, correlator));
+            }
+            try {
+                var data = JSON.parse(response.responseText);
+            } catch (e) {
+                throw new NGSI.InvalidResponseError('Server returned invalid JSON content', correlator);
+            }
+            return Promise.resolve({
+                correlator: correlator,
+                entity: data
+            });
+        });
+    };
+
+    /**
+     * Gets all the attributes of an entity.
+     *
+     * > This method uses NGSI-LD API of ETSI ISG CIM
+     *
+     * @since 1.4.0
+     *
+     * @name NGSI.Connection#ldv1.getEntityAttributes
+     * @method "ldv1.getEntityAttributes"
+     * @memberof NGSI.Connection
+     *
+     * @param {String|Object} options
+     *
+     * String with the id of the entity to query or an object with extra
+     * options:
+     *
+     * - `correlator` (`String`): Transaction id
+     * - `keyValues` (`Boolean`; default: `false`): Use flat attributes
+     * - `id` (`String`, required): Id of the entity to query
+     * - `service` (`String`): Service/tenant to use in this operation
+     * - `servicepath` (`String`): Service path to use in this operation
+     * - `type` (`String`): Entity type, to avoid ambiguity in case there are
+     *   several entities with the same entity id.
+     *
+     * @throws {NGSI.ConnectionError}
+     * @throws {NGSI.InvalidResponseError}
+     * @throws {NGSI.NotFoundError}
+     * @throws {NGSI.TooManyResultsError}
+     *
+     * @returns {Promise}
+     *
+     * @example <caption>Basic usage</caption>
+     *
+     * connection.ldv1.getEntityAttributes("Spain-Road-A62").then(
+     *     (response) => {
+     *         // Entity attributes retrieved successfully
+     *         // response.attributes entity attributes
+     *         // response.correlator transaction id associated with the server response
+     *     }, (error) => {
+     *         // Error retrieving the attributes of the entity
+     *         // If the error was reported by Orion, error.correlator will be
+     *         // filled with the associated transaction id
+     *     }
+     * );
+     *
+     * @example <caption>Retrieve a typed entity and using the keyValues option</caption>
+     *
+     * connection.ldv1.getEntityAttributes({
+     *     id: "Spain-Road-A62",
+     *     type: "Road",
+     *     keyValues: true
+     * }).then(
+     *     (response) => {
+     *         // Entity attributes retrieved successfully
+     *         // response.attributes entity attributes
+     *         // response.correlator transaction id associated with the server response
+     *     }, (error) => {
+     *         // Error retrieving the attributes of the entity
+     *         // If the error was reported by Orion, error.correlator will be
+     *         // filled with the associated transaction id
+     *     }
+     * );
+     *
+     */
+    NGSI.Connection.LDV1.prototype.getEntityAttributes = function getEntityAttributes(options) {
+        if (options == null) {
+            throw new TypeError("missing options parameter");
+        }
+
+        if (typeof options === "string") {
+            options = {
+                id: options
+            };
+        } else if (options.id == null) {
+            throw new TypeError("missing id option");
+        }
+
+        var connection = privates.get(this);
+        var url = new URL(interpolate(NGSI.endpoints.ldv1.ENTITY_ATTRS_COLLECTION, {entityId: encodeURIComponent(options.id)}), connection.url);
+        var parameters = {};
+        if (options.type != null) {
+            parameters.type = options.type;
+        }
+
+        if (options.keyValues === true) {
+            parameters.options = "keyValues";
+        }
+
+        return makeJSONRequest3.call(connection, url, {
+            method: "GET",
+            parameters: parameters,
+            requestHeaders: {
+                "FIWARE-Correlator": options.correlator,
+                "FIWARE-Service": options.service,
+                "FIWARE-ServicePath": options.servicepath
+            }
+        }).then(function (response) {
+            var correlator = response.getHeader('Fiware-correlator');
+            if (response.status === 409) {
+                return parse_too_many_results(response, correlator);
+            } else if (response.status === 404) {
+                return parse_not_found_response(response, correlator);
+            } else if (response.status !== 200) {
+                return Promise.reject(new NGSI.InvalidResponseError('Unexpected error code: ' + response.status, correlator));
+            }
+            try {
+                var data = JSON.parse(response.responseText);
+            } catch (e) {
+                throw new NGSI.InvalidResponseError('Server returned invalid JSON content', correlator);
+            }
+            return Promise.resolve({
+                attributes: data,
+                correlator: correlator
+            });
+        });
+    };
+
+    /**
+     * Updates or appends attributes to an entity.
+     *
+     * > This method uses NGSI-LD API of ETSI ISG CIM
+     *
+     * @since 1.4.0
+     *
+     * @name NGSI.Connection#ldv1.appendEntityAttributes
+     * @method "ldv1.appendEntityAttributes"
+     * @memberof NGSI.Connection
+     *
+     * @param {Object} changes
+     *
+     * New values for the attributes. Must contain the `id` of the entity to
+     * update and may contain the `type` option to avoid ambiguity in case there are
+     * several entities with the same entity id.
+     *
+     * @param {Object} [options]
+     *
+     * Object with extra options:
+     *
+     * - `correlator` (`String`): transaction id
+     * - `keyValues` (`Boolean`; default: `false`): Use flat attributes
+     * - `strict` (`Boolean`; default: `false`): Force strict append semantics
+     * - `service` (`String`): Service/tenant to use in this operation
+     * - `servicepath` (`String`): Service path to use in this operation
+     * - `type` (`String`): Entity type, to avoid ambiguity in case there are
+     *   several entities with the same entity id.
+     *
+     * @throws {NGSI.BadRequestError}
+     * @throws {NGSI.ConnectionError}
+     * @throws {NGSI.InvalidResponseError}
+     * @throws {NGSI.NotFoundError}
+     * @throws {NGSI.TooManyResultsError}
+     *
+     * @returns {Promise}
+     *
+     * @example <caption>Append or update the temperature attribute</caption>
+     *
+     * connection.ldv1.appendEntityAttributes({
+     *     "id": "Bcn-Welt",
+     *     "temperature": {
+     *         "value": 31.5
+     *     }
+     * }).then(
+     *     (response) => {
+     *         // Attributes appended successfully
+     *         // response.correlator transaction id associated with the server response
+     *     }, (error) => {
+     *         // Error appending the attributes to the entity
+     *         // If the error was reported by Orion, error.correlator will be
+     *         // filled with the associated transaction id
+     *     }
+     * );
+     *
+     * @example <caption>Append the temperature attribute</caption>
+     *
+     * connection.ldv1.appendEntityAttributes({
+     *     "id": "Bcn-Welt",
+     *     "temperature": 31.5
+     * }, {
+     *     strict: true,
+     *     keyValues: true
+     * }).then(
+     *     (response) => {
+     *         // Attributes appended successfully
+     *         // response.correlator transaction id associated with the server response
+     *     }, (error) => {
+     *         // Error appending the attributes to the entity
+     *         // If the error was reported by Orion, error.correlator will be
+     *         // filled with the associated transaction id
+     *     }
+     * );
+     *
+     */
+    NGSI.Connection.LDV1.prototype.appendEntityAttributes = function appendEntityAttributes(changes, options) {
+        if (options == null) {
+            options = {};
+        }
+
+        var connection = privates.get(this);
+        var url = new URL(interpolate(NGSI.endpoints.ldv1.ENTITY_ATTRS_COLLECTION, {entityId: encodeURIComponent(changes.id)}), connection.url);
+        var parameters = {};
+        var optionsparams = [];
+
+        // Remove id from the payload
+        delete changes.id;
+        if (changes.type != null) {
+            parameters.type = changes.type;
+            delete changes.type;
+        } else if (options.type != null) {
+            parameters.type = options.type;
+        }
+
+        if (options.strict === true) {
+            optionsparams.push("append");
+        }
+
+        if (options.keyValues === true) {
+            optionsparams.push("keyValues");
+        }
+
+        if (optionsparams.length > 0) {
+            parameters.options = optionsparams.join(',');
+        }
+
+        return makeJSONRequest3.call(connection, url, {
+            method: "POST",
+            parameters: parameters,
+            postBody: changes,
+            requestHeaders: {
+                "FIWARE-Correlator": options.correlator,
+                "FIWARE-Service": options.service,
+                "FIWARE-ServicePath": options.servicepath
+            }
+        }).then(function (response) {
+            var correlator = response.getHeader('Fiware-correlator');
+            if (response.status === 400) {
+                return parse_bad_request(response, correlator);
+            } else if (response.status === 409) {
+                return parse_too_many_results(response, correlator);
+            } else if (response.status === 404) {
+                return parse_not_found_response(response, correlator);
+            } else if (response.status !== 204) {
+                return Promise.reject(new NGSI.InvalidResponseError('Unexpected error code: ' + response.status, correlator));
+            }
+            return Promise.resolve({
+                correlator: correlator
+            });
+        });
+    };
+
+    /**
+     * Updates attributes of an entity.
+     *
+     * > This method uses NGSI-LD API of ETSI ISG CIM
+     *
+     * @since 1.4.0
+     *
+     * @name NGSI.Connection#ldv1.updateEntityAttributes
+     * @method "ldv1.updateEntityAttributes"
+     * @memberof NGSI.Connection
+     *
+     * @param {Object} changes
+     *
+     * New values for the attributes. Must contain the `id` of the entity to
+     * update and may contain the `type` option to avoid ambiguity in case there are
+     * several entities with the same entity id.
+     *
+     * @param {Object} [options]
+     *
+     * Object with extra options:
+     *
+     * - `correlator` (`String`): Transaction id
+     * - `keyValues` (`Boolean`; default: `false`): Use flat attributes
+     * - `service` (`String`): Service/tenant to use in this operation
+     * - `servicepath` (`String`): Service path to use in this operation
+     *
+     * @throws {NGSI.BadRequestError}
+     * @throws {NGSI.ConnectionError}
+     * @throws {NGSI.InvalidResponseError}
+     * @throws {NGSI.NotFoundError}
+     * @throws {NGSI.TooManyResultsError}
+     *
+     * @returns {Promise}
+     *
+     * @example <caption>Basic attribute update</caption>
+     *
+     * connection.ldv1.updateEntityAttributes({
+     *     "id": "sensor",
+     *     "temperature": {
+     *         "value": 31.5
+     *     },
+     *     "humidity": {
+     *         "value": 50.2
+     *     }
+     * }).then(
+     *     (response) => {
+     *         // Attributes updated successfully
+     *         // response.correlator transaction id associated with the server response
+     *     }, (error) => {
+     *         // Error updating the attributes of the entity
+     *         // If the error was reported by Orion, error.correlator will be
+     *         // filled with the associated transaction id
+     *     }
+     * );
+     *
+     * @example <caption>Update some attributes using the keyValues option</caption>
+     *
+     * connection.ldv1.updateEntityAttributes({
+     *     "id": "sensor",
+     *     "temperature": 31.5
+     *     "humidity": 50.2
+     * }, {
+     *     keyValues: true
+     * }).then(
+     *     (response) => {
+     *         // Attributes updated successfully
+     *         // response.correlator transaction id associated with the server response
+     *     }, (error) => {
+     *         // Error updating the attributes of the entity
+     *         // If the error was reported by Orion, error.correlator will be
+     *         // filled with the associated transaction id
+     *     }
+     * );
+     *
+     */
+    NGSI.Connection.LDV1.prototype.updateEntityAttributes = function updateEntityAttributes(changes, options) {
+        if (options == null) {
+            options = {};
+        }
+
+        if (changes == null) {
+            throw new TypeError("missing changes parameter");
+        }
+
+        var connection = privates.get(this);
+        var url = new URL(interpolate(NGSI.endpoints.ldv1.ENTITY_ATTRS_COLLECTION, {entityId: encodeURIComponent(changes.id)}), connection.url);
+        var parameters = {};
+
+        // Remove id from the payload
+        delete changes.id;
+        if (changes.type != null) {
+            parameters.type = changes.type;
+            delete changes.type;
+        }
+
+        if (options.keyValues === true) {
+            parameters.options = "keyValues";
+        }
+
+        return makeJSONRequest3.call(connection, url, {
+            method: "PATCH",
+            parameters: parameters,
+            postBody: changes,
+            requestHeaders: {
+                "FIWARE-Correlator": options.correlator,
+                "FIWARE-Service": options.service,
+                "FIWARE-ServicePath": options.servicepath
+            }
+        }).then(function (response) {
+            var correlator = response.getHeader('Fiware-correlator');
+            if (response.status === 400) {
+                return parse_bad_request(response, correlator);
+            } else if (response.status === 409) {
+                return parse_too_many_results(response, correlator);
+            } else if (response.status === 404) {
+                return parse_not_found_response(response, correlator);
+            } else if (response.status !== 204) {
+                return Promise.reject(new NGSI.InvalidResponseError('Unexpected error code: ' + response.status, correlator));
+            }
+            return Promise.resolve({
+                correlator: correlator
+            });
+        });
+    };
+
+    /**
+     * Replaces all the attributes associated with a entity.
+     *
+     * > This method uses NGSI-LD API of ETSI ISG CIM
+     *
+     * @since 1.4.0
+     *
+     * @name NGSI.Connection#ldv1.replaceEntityAttributes
+     * @method "ldv1.replaceEntityAttributes"
+     * @memberof NGSI.Connection
+     *
+     * @param {Object} entity
+     *
+     * New values for the attributes. Must contain the `id` of the entity to
+     * update and may contain the `type` option to avoid ambiguity in case there are
+     * several entities with the same entity id.
+     *
+     * @param {Object} [options]
+     *
+     * Object with extra options:
+     *
+     * - `correlator` (`String`): Transaction id
+     * - `keyValues` (`Boolean`; default: `false`): Use flat attributes
+     * - `service` (`String`): Service/tenant to use in this operation
+     * - `servicepath` (`String`): Service path to use in this operation
+     *
+     * @throws {NGSI.BadRequestError}
+     * @throws {NGSI.ConnectionError}
+     * @throws {NGSI.InvalidResponseError}
+     * @throws {NGSI.NotFoundError}
+     * @throws {NGSI.TooManyResultsError}
+     *
+     * @returns {Promise}
+     *
+     * @example <caption>Basic usage</caption>
+     *
+     * connection.ldv1.replaceEntityAttributes({
+     *     "id": "Spain-Road-A62",
+     *     "type": "Road",
+     *     "name": {"value": "A-62"},
+     *     "alternateName": {"value": "E-80"},
+     *     "description": {"value": "Autovía de Castilla"},
+     *     "roadClass": {"value": "motorway"},
+     *     "length": {"value": 355},
+     *     "refRoadSegment": {
+     *         "value": [
+     *             "Spain-RoadSegment-A62-0-355-forwards",
+     *             "Spain-RoadSegment-A62-0-355-backwards"
+     *         ]
+     *      },
+     *     "responsible": {"value": "Ministerio de Fomento - Gobierno de España"}
+     * }).then(
+     *     (response) => {
+     *         // Entity attributes replaced successfully
+     *         // response.correlator transaction id associated with the server response
+     *     }, (error) => {
+     *         // Error replacing the attributes of the entity
+     *         // If the error was reported by Orion, error.correlator will be
+     *         // filled with the associated transaction id
+     *     }
+     * );
+     *
+     * @example <caption>Using the keyValues option</caption>
+     *
+     * connection.ldv1.replaceEntityAttributes({
+     *     "id": "Spain-Road-A62",
+     *     "type": "Road",
+     *     "name": "A-62",
+     *     "alternateName": "E-80",
+     *     "description": "Autovía de Castilla",
+     *     "roadClass": "motorway",
+     *     "length": 355,
+     *     "refRoadSegment": [
+     *         "Spain-RoadSegment-A62-0-355-forwards",
+     *         "Spain-RoadSegment-A62-0-355-backwards"
+     *     ],
+     *     "responsible": "Ministerio de Fomento - Gobierno de España"
+     * }, {keyValues: true}).then(
+     *     (response) => {
+     *         // Entity attributes replaced successfully
+     *         // response.correlator transaction id associated with the server response
+     *     }, (error) => {
+     *         // Error replacing the attributes of the entity
+     *         // If the error was reported by Orion, error.correlator will be
+     *         // filled with the associated transaction id
+     *     }
+     * );
+     *
+     */
+    /*
+    NGSI.Connection.LDV1.prototype.replaceEntityAttributes = function replaceEntityAttributes(entity, options) {
+        if (options == null) {
+            options = {};
+        }
+
+        var connection = privates.get(this);
+        var url = new URL(interpolate(NGSI.endpoints.ldv1.ENTITY_ATTRS_COLLECTION, {entityId: encodeURIComponent(entity.id)}), connection.url);
+        var parameters = {};
+        var payload = ngsi_build_replace_entity_request(entity, options, parameters);
+        return makeJSONRequest3.call(connection, url, {
+            method: "PUT",
+            postBody: payload,
+            parameters: parameters,
+            requestHeaders: {
+                "FIWARE-Correlator": options.correlator,
+                "FIWARE-Service": options.service,
+                "FIWARE-ServicePath": options.servicepath
+            }
+        }).then(function (response) {
+            var correlator = response.getHeader('Fiware-correlator');
+            if (response.status === 400) {
+                return parse_bad_request(response, correlator);
+            } else if (response.status === 409) {
+                return parse_too_many_results(response, correlator);
+            } else if (response.status === 404) {
+                return parse_not_found_response(response, correlator);
+            } else if (response.status !== 204) {
+                return Promise.reject(new NGSI.InvalidResponseError('Unexpected error code: ' + response.status, correlator));
+            }
+            return Promise.resolve({
+                correlator: correlator,
+                entity: entity
+            });
+        });
+    };
+    */
+
+    /**
+     * Removes an entity from context broker server.
+     *
+     * > This method uses NGSI-LD API of ETSI ISG CIM
+     *
+     * @since 1.4.0
+     *
+     * @name NGSI.Connection#ldv1.deleteEntity
+     * @method "ldv1.deleteEntity"
+     * @memberof NGSI.Connection
+     *
+     * @param {String|Object} options
+     *
+     * String with the entity id to remove or an object providing options:
+     *
+     * - `correlator` (`String`): Transaction id
+     * - `id` (`String`, required): Id of the entity to remove
+     * - `service` (`String`): Service/tenant to use in this operation
+     * - `servicepath` (`String`): Service path to use in this operation
+     * - `type` (`String`): Entity type, to avoid ambiguity in case there are
+     *   several entities with the same entity id.
+     *
+     * @throws {NGSI.ConnectionError}
+     * @throws {NGSI.InvalidResponseError}
+     * @throws {NGSI.NotFoundError}
+     * @throws {NGSI.TooManyResultsError}
+     *
+     * @returns {Promise}
+     *
+     * @example <caption>Remove entity by Id</caption>
+     *
+     * connection.ldv1.deleteEntity("Spain-Road-A62").then(
+     *     (response) => {
+     *         // Entity deleted successfully
+     *         // response.correlator transaction id associated with the server response
+     *     }, (error) => {
+     *         // Error deleting the entity
+     *         // If the error was reported by Orion, error.correlator will be
+     *         // filled with the associated transaction id
+     *     }
+     * );
+     *
+     * @example <caption>Remove entity by Id and type</caption>
+     *
+     * connection.ldv1.deleteEntity({
+     *     id: "Spain-Road-A62",
+     *     type: "Road"
+     *  }).then(
+     *     (response) => {
+     *         // Entity deleted successfully
+     *         // response.correlator transaction id associated with the server response
+     *     }, (error) => {
+     *         // Error deleting the entity
+     *         // If the error was reported by Orion, error.correlator will be
+     *         // filled with the associated transaction id
+     *     }
+     * );
+     */
+    NGSI.Connection.LDV1.prototype.deleteEntity = function deleteEntity(options) {
+        if (options == null) {
+            throw new TypeError("missing options parameter");
+        }
+
+        if (typeof options === "string") {
+            options = {
+                id: options
+            };
+        } else if (options.id == null) {
+            throw new TypeError("missing id option");
+        }
+
+        var connection = privates.get(this);
+        var url = new URL(interpolate(NGSI.endpoints.ldv1.ENTITY_ENTRY, {entityId: encodeURIComponent(options.id)}), connection.url);
+
+        var parameters = {};
+        if (options.type != null) {
+            parameters.type = options.type;
+        }
+
+        return makeJSONRequest3.call(connection, url, {
+            method: "DELETE",
+            parameters: parameters,
+            requestHeaders: {
+                "FIWARE-Correlator": options.correlator,
+                "FIWARE-Service": options.service,
+                "FIWARE-ServicePath": options.servicepath
+            }
+        }).then(function (response) {
+            var correlator = response.getHeader('Fiware-correlator');
+            if (response.status === 409) {
+                return parse_too_many_results(response, correlator);
+            } else if (response.status === 404) {
+                return parse_not_found_response(response, correlator);
+            } else if (response.status !== 204) {
+                return Promise.reject(new NGSI.InvalidResponseError('Unexpected error code: ' + response.status, correlator));
+            }
+            return Promise.resolve({
+                correlator: correlator
+            });
+        });
+    };
+
+    /**
+     * Gets the details about an entity attribute.
+     *
+     * > This method uses NGSI-LD API of ETSI ISG CIM
+     *
+     * @since 1.4.0
+     *
+     * @name NGSI.Connection#ldv1.getEntityAttribute
+     * @method "ldv1.getEntityAttribute"
+     * @memberof NGSI.Connection
+     *
+     * @param {Object} options
+     *
+     * Object with options:
+     *
+     * - `attribute` (`String`, required): Name of the attribute to query
+     * - `correlator` (`String`): Transaction id
+     * - `id` (`String`, required): Id of the entity to query
+     * - `service` (`String`): Service/tenant to use in this operation
+     * - `servicepath` (`String`): Service path to use in this operation
+     * - `type` (`String`): Entity type, to avoid ambiguity in case there are
+     *   several entities with the same entity id.
+     *
+     * @throws {NGSI.ConnectionError}
+     * @throws {NGSI.InvalidResponseError}
+     * @throws {NGSI.NotFoundError}
+     * @throws {NGSI.TooManyResultsError}
+     *
+     * @returns {Promise}
+     *
+     * @example <caption>Basic usage</caption>
+     *
+     * connection.ldv1.getEntityAttribute({
+     *     id: "Bcn_Welt",
+     *     attribute: "temperature"
+     * }).then(
+     *     (response) => {
+     *         // Entity details retrieved successfully
+     *         // response.attribute attribute details
+     *         // response.correlator transaction id associated with the server response
+     *     }, (error) => {
+     *         // Error retrieving entity
+     *         // If the error was reported by Orion, error.correlator will be
+     *         // filled with the associated transaction id
+     *     }
+     * );
+     *
+     * @example <caption>Get entity attribute using the type option</caption>
+     *
+     * connection.ldv1.getEntityAttribute({
+     *     id: "Bcn_Welt",
+     *     type: "Room",
+     *     attribute: "temperature"
+     * }).then(
+     *     (response) => {
+     *         // Entity details retrieved successfully
+     *         // response.attribute attribute details
+     *         // response.correlator transaction id associated with the server response
+     *     }, (error) => {
+     *         // Error retrieving entity
+     *         // If the error was reported by Orion, error.correlator will be
+     *         // filled with the associated transaction id
+     *     }
+     * );
+     *
+     */
+    NGSI.Connection.LDV1.prototype.getEntityAttribute = function getEntityAttribute(options) {
+        if (options == null) {
+            throw new TypeError("missing options parameter");
+        }
+
+        if (options.id == null) {
+            throw new TypeError("missing id option");
+        } else if (options.attribute == null) {
+            throw new TypeError("missing attribute option");
+        }
+
+        var connection = privates.get(this);
+        var url = new URL(interpolate(
+            NGSI.endpoints.ldv1.ENTITY_ATTR_ENTRY, {
+                entityId: encodeURIComponent(options.id),
+                attribute: encodeURIComponent(options.attribute)
+            }
+        ), connection.url);
+        var parameters = {};
+        if (options.type != null) {
+            parameters.type = options.type;
+        }
+
+        return makeJSONRequest3.call(connection, url, {
+            method: "GET",
+            parameters: parameters,
+            requestHeaders: {
+                "FIWARE-Correlator": options.correlator,
+                "FIWARE-Service": options.service,
+                "FIWARE-ServicePath": options.servicepath
+            }
+        }).then(function (response) {
+            var correlator = response.getHeader('Fiware-correlator');
+            if (response.status === 409) {
+                return parse_too_many_results(response, correlator);
+            } else if (response.status === 404) {
+                return parse_not_found_response(response, correlator);
+            } else if (response.status !== 200) {
+                return Promise.reject(new NGSI.InvalidResponseError('Unexpected error code: ' + response.status), correlator);
+            }
+            try {
+                var data = JSON.parse(response.responseText);
+            } catch (e) {
+                throw new NGSI.InvalidResponseError('Server returned invalid JSON content', correlator);
+            }
+            return Promise.resolve({
+                correlator: correlator,
+                attribute: data
+            });
+        });
+    };
+
+    /**
+     * Update the details about an entity attribute.
+     *
+     * > This method uses NGSI-LD API of ETSI ISG CIM
+     *
+     * @since 1.4.0
+     *
+     * @name NGSI.Connection#ldv1.replaceEntityAttribute
+     * @method "ldv1.replaceEntityAttribute"
+     * @memberof NGSI.Connection
+     *
+     * @param {Object} changes
+     *
+     * Object with the new values for the attribute. Can also be used for
+     * providing options. See the `options` parameter.
+     *
+     * @param {Object} [options]
+     *
+     * Object with options (those options can also be passed inside the changes
+     * parameter):
+     *
+     * - `attribute` (`String`, required): Name of the attribute to modify
+     * - `correlator` (`String`): Transaction id
+     * - `id` (`String`, required): Id of the entity to modify
+     * - `service` (`String`): Service/tenant to use in this operation
+     * - `servicepath` (`String`): Service path to use in this operation
+     * - `type` (`String`): Entity type, to avoid ambiguity in case there are
+     *   several entities with the same entity id.
+     *
+     * @throws {NGSI.BadRequestError}
+     * @throws {NGSI.ConnectionError}
+     * @throws {NGSI.InvalidResponseError}
+     * @throws {NGSI.NotFoundError}
+     * @throws {NGSI.TooManyResultsError}
+     *
+     * @returns {Promise}
+     *
+     * @example <caption>Simple usage</caption>
+     *
+     * connection.ldv1.replaceEntityAttribute({
+     *     id: "Bcn_Welt",
+     *     attribute: "temperature"
+     *     value: 25,
+     *     metadata: {
+     *         "unitCode": {
+     *             "value": "CEL"
+     *         }
+     *     }
+     * }).then(
+     *     (response) => {
+     *         // Entity attribute replaced successfully
+     *         // response.attribute attribute details
+     *         // response.correlator transaction id associated with the server response
+     *     }, (error) => {
+     *         // Error replacing entity attribute
+     *         // If the error was reported by Orion, error.correlator will be
+     *         // filled with the associated transaction id
+     *         // Entity details retrieved successfully
+     *     }
+     * );
+     *
+     * @example <caption>Partial update</caption>
+     *
+     * connection.ldv1.getEntityAttribute({
+     *     id: "Bcn_Welt",
+     *     attribute: "temperature"
+     * }).then((response) => {
+     *     var changes = response.attribute;
+     *     changes.metadata.unitCode = {
+     *         "value": "FAR"
+     *     };
+     *     return connection.ldv1.replaceEntityAttribute(changes, {
+     *         id: "Bcn_Welt",
+     *         attribute: "temperature"
+     *     });
+     * }).then(
+     *     (response) => {
+     *         // Entity attribute replaced successfully
+     *         // response.attribute attribute details
+     *         // response.correlator transaction id associated with the server response
+     *     }, (error) => {
+     *         // Error replacing entity attribute
+     *         // If the error was reported by Orion, error.correlator will be
+     *         // filled with the associated transaction id
+     *     }
+     * );
+     */
+    NGSI.Connection.LDV1.prototype.replaceEntityAttribute = function replaceEntityAttribute(changes, options) {
+        if (changes == null) {
+            throw new TypeError("missing changes parameter");
+        }
+
+        if (options == null) {
+            options = {
+                attribute: changes.attribute,
+                correlator: changes.correlator,
+                id: changes.id,
+                service: changes.service,
+                servicepath: changes.servicepath,
+                type: changes.type
+            };
+        }
+
+        if (options.id == null) {
+            throw new TypeError("missing id option");
+        } else if (options.attribute == null) {
+            throw new TypeError("missing attribute option");
+        }
+
+        var data = {
+            value: changes.value,
+            metadata: changes.metadata
+        };
+        var connection = privates.get(this);
+        var url = new URL(interpolate(
+            NGSI.endpoints.ldv1.ENTITY_ATTR_ENTRY, {
+                entityId: encodeURIComponent(options.id),
+                attribute: encodeURIComponent(options.attribute)
+            }
+        ), connection.url);
+        var parameters = {};
+        if (options.type != null) {
+            parameters.type = options.type;
+        }
+
+        return makeJSONRequest3.call(connection, url, {
+            method: "PUT",
+            parameters: parameters,
+            postBody: data,
+            requestHeaders: {
+                "FIWARE-Correlator": options.correlator,
+                "FIWARE-Service": options.service,
+                "FIWARE-ServicePath": options.servicepath
+            }
+        }).then(function (response) {
+            var correlator = response.getHeader('Fiware-correlator');
+            if (response.status === 400) {
+                return parse_bad_request(response, correlator);
+            } else if (response.status === 409) {
+                return parse_too_many_results(response, correlator);
+            } else if (response.status === 404) {
+                return parse_not_found_response(response, correlator);
+            } else if (response.status !== 204) {
+                return Promise.reject(new NGSI.InvalidResponseError('Unexpected error code: ' + response.status, correlator));
+            }
+            return Promise.resolve({
+                correlator: correlator,
+                attribute: data
+            });
+        });
+    };
+
+    /**
+     * Removes a single attribute from an entity stored in the orion context
+     * broker server.
+     *
+     * > This method uses NGSI-LD API of ETSI ISG CIM
+     *
+     * @since 1.4.0
+     *
+     * @name NGSI.Connection#ldv1.deleteEntityAttribute
+     * @method "ldv1.deleteEntityAttribute"
+     * @memberof NGSI.Connection
+     *
+     * @param {Object} options
+     *
+     * Object providing information about the attribute to remove and any
+     * extra options:
+     *
+     * - `attribute` (`String`, required): Name of the attribute to delete
+     * - `correlator` (`String`): Transaction id
+     * - `id` (`String`, required): Id of the entity to modify
+     * - `service` (`String`): Service/tenant to use in this operation
+     * - `servicepath` (`String`): Service path to use in this operation
+     * - `type` (`String`): Entity type, to avoid ambiguity in case there are
+     *   several entities with the same entity id.
+     *
+     * @throws {NGSI.ConnectionError}
+     * @throws {NGSI.InvalidResponseError}
+     * @throws {NGSI.NotFoundError}
+     * @throws {NGSI.TooManyResultsError}
+     *
+     * @returns {Promise}
+     *
+     * @example <caption>Remove an attribute from an entity</caption>
+     *
+     * connection.ldv1.deleteEntityAttribute({
+     *     id: "Bcn_Welt",
+     *     attribute: "temperature"
+     * }).then(
+     *     (response) => {
+     *         // Entity attribute deleted successfully
+     *         // response.correlator transaction id associated with the server response
+     *     }, (error) => {
+     *         // Error deleting the entity
+     *         // If the error was reported by Orion, error.correlator will be
+     *         // filled with the associated transaction id
+     *     }
+     * );
+     *
+     * @example <caption>Remove an attribute from an entity indicating the entity type</caption>
+     *
+     * connection.ldv1.deleteEntityAttribute({
+     *     id: "Bcn_Welt",
+     *     type: "Room",
+     *     attribute: "temperature"
+     *  }).then(
+     *     (response) => {
+     *         // Entity attribute deleted successfully
+     *         // response.correlator transaction id associated with the server response
+     *     }, (error) => {
+     *         // Error deleting the entity
+     *         // If the error was reported by Orion, error.correlator will be
+     *         // filled with the associated transaction id
+     *     }
+     * );
+     */
+    NGSI.Connection.LDV1.prototype.deleteEntityAttribute = function deleteEntityAttribute(options) {
+        if (options == null) {
+            throw new TypeError("missing options parameter");
+        }
+
+        if (options.id == null) {
+            throw new TypeError("missing id option");
+        } else if (options.attribute == null) {
+            throw new TypeError("missing attribute option");
+        }
+
+        var connection = privates.get(this);
+        var url = new URL(interpolate(
+            NGSI.endpoints.ldv1.ENTITY_ATTR_ENTRY, {
+                entityId: encodeURIComponent(options.id),
+                attribute: encodeURIComponent(options.attribute)
+            }
+        ), connection.url);
+
+        var parameters = {};
+        if (options.type != null) {
+            parameters.type = options.type;
+        }
+
+        return makeJSONRequest3.call(connection, url, {
+            method: "DELETE",
+            parameters: parameters,
+            requestHeaders: {
+                "FIWARE-Correlator": options.correlator,
+                "FIWARE-Service": options.service,
+                "FIWARE-ServicePath": options.servicepath
+            }
+        }).then(function (response) {
+            var correlator = response.getHeader('Fiware-correlator');
+            if (response.status === 409) {
+                return parse_too_many_results(response, correlator);
+            } else if (response.status === 404) {
+                return parse_not_found_response(response, correlator);
+            } else if (response.status !== 204) {
+                return Promise.reject(new NGSI.InvalidResponseError('Unexpected error code: ' + response.status, correlator));
+            }
+            return Promise.resolve({
+                correlator: correlator
+            });
+        });
+    };
+
+    /**
+     * Gets the value of an entity attribute.
+     *
+     * > This method uses NGSI-LD API of ETSI ISG CIM
+     *
+     * @since 1.4.0
+     *
+     * @name NGSI.Connection#ldv1.getEntityAttributeValue
+     * @method "ldv1.getEntityAttributeValue"
+     * @memberof NGSI.Connection
+     *
+     * @param {Object} options
+     *
+     * Object with extra options:
+     *
+     * - `attribute` (`String`, required): Name of the attribute to query
+     * - `correlator` (`String`): Transaction id
+     * - `id` (`String`, required): Id of the entity to query
+     * - `service` (`String`): Service/tenant to use in this operation
+     * - `servicepath` (`String`): Service path to use in this operation
+     * - `type` (`String`): Entity type, to avoid ambiguity in case there are
+     *   several entities with the same entity id.
+     *
+     * @throws {NGSI.ConnectionError}
+     * @throws {NGSI.InvalidResponseError}
+     * @throws {NGSI.NotFoundError}
+     * @throws {NGSI.TooManyResultsError}
+     *
+     * @returns {Promise}
+     *
+     * @example <caption>Basic usage</caption>
+     *
+     * connection.ldv1.getEntityAttributeValue({
+     *     id: "Bcn_Welt",
+     *     attribute: "temperature"
+     * }).then(
+     *     (response) => {
+     *         // Entity value retrieved successfully
+     *         // response.value entity value
+     *         // response.correlator transaction id associated with the server response
+     *     }, (error) => {
+     *         // Error retrieving attribute value
+     *         // If the error was reported by Orion, error.correlator will be
+     *         // filled with the associated transaction id
+     *     }
+     * );
+     *
+     * @example <caption>Get attribute value from a typed entity</caption>
+     *
+     * connection.ldv1.getEntityAttributeValue({
+     *     id: "Bcn_Welt",
+     *     type: "Room",
+     *     attribute: "temperature"
+     * }).then(
+     *     (response) => {
+     *         // Entity value retrieved successfully
+     *         // response.value entity value
+     *         // response.correlator transaction id associated with the server response
+     *     }, (error) => {
+     *         // Error retrieving attribute value
+     *         // If the error was reported by Orion, error.correlator will be
+     *         // filled with the associated transaction id
+     *     }
+     * );
+     *
+     */
+    NGSI.Connection.LDV1.prototype.getEntityAttributeValue = function getEntityAttributeValue(options) {
+        if (options == null) {
+            throw new TypeError("missing options parameter");
+        }
+
+        if (options.id == null) {
+            throw new TypeError("missing id option");
+        } else if (options.attribute == null) {
+            throw new TypeError("missing attribute option");
+        }
+
+        var connection = privates.get(this);
+        var url = new URL(interpolate(
+            NGSI.endpoints.ldv1.ENTITY_ATTR_VALUE_ENTRY, {
+                entityId: encodeURIComponent(options.id),
+                attribute: encodeURIComponent(options.attribute)
+            }
+        ), connection.url);
+        var parameters = {};
+        if (options.type != null) {
+            parameters.type = options.type;
+        }
+
+        return makeJSONRequest3.call(connection, url, {
+            method: "GET",
+            parameters: parameters,
+            requestHeaders: {
+                // See bug telefonicaid/fiware-orion#2696
+                "Accept": "application/json, text/plain",
+                "FIWARE-Correlator": options.correlator,
+                "FIWARE-Service": options.service,
+                "FIWARE-ServicePath": options.servicepath
+            }
+        }).then(function (response) {
+            var correlator = response.getHeader('Fiware-correlator');
+            if (response.status === 409) {
+                return parse_too_many_results(response, correlator);
+            } else if (response.status === 404) {
+                return parse_not_found_response(response, correlator);
+            } else if (response.status !== 200) {
+                return Promise.reject(new NGSI.InvalidResponseError('Unexpected error code: ' + response.status, correlator));
+            }
+            try {
+                var data = JSON.parse(response.responseText);
+            } catch (e) {
+                throw new NGSI.InvalidResponseError('Server returned invalid JSON content', correlator);
+            }
+            return Promise.resolve({
+                correlator: correlator,
+                value: data
+            });
+        });
+    };
+
+    /**
+     * Updates the value of an entity attribute.
+     *
+     * > This method uses NGSI-LD API of ETSI ISG CIM
+     *
+     * @since 1.4.0
+     *
+     * @name NGSI.Connection#ldv1.replaceEntityAttributeValue
+     * @method "ldv1.replaceEntityAttributeValue"
+     * @memberof NGSI.Connection
+     *
+     * @param {Object} options
+     *
+     * Object with options:
+     *
+     * - `attribute` (`String`, required): Name of the attribute to query
+     * - `correlator` (`String`): Transaction id
+     * - `id` (`String`, required): Id of the entity to query
+     * - `service` (`String`): Service/tenant to use in this operation
+     * - `servicepath` (`String`): Service path to use in this operation
+     * - `value` (`String`|`Boolean`|`Number`|`Object`|`Array`, required) new
+     *   value
+     * - `type` (`String`): Entity type, to avoid ambiguity in case there are
+     *   several entities with the same entity id.
+     *
+     * @throws {NGSI.BadRequestError}
+     * @throws {NGSI.ConnectionError}
+     * @throws {NGSI.InvalidResponseError}
+     * @throws {NGSI.NotFoundError}
+     * @throws {NGSI.TooManyResultsError}
+     *
+     * @returns {Promise}
+     *
+     * @example <caption>Basic usage</caption>
+     *
+     * connection.ldv1.replaceEntityAttributeValue({
+     *     id: "Bcn_Welt",
+     *     attribute: "temperature",
+     *     value: 21
+     * }).then(
+     *     (response) => {
+     *         // Entity value replaced successfully
+     *         // response.value entity value
+     *         // response.correlator transaction id associated with the server response
+     *     }, (error) => {
+     *         // Error replacing attribute value
+     *         // If the error was reported by Orion, error.correlator will be
+     *         // filled with the associated transaction id
+     *     }
+     * );
+     *
+     * @example <caption>Get attribute value from a typed entity</caption>
+     *
+     * connection.ldv1.replaceEntityAttributeValue({
+     *     id: "Bcn_Welt",
+     *     type: "Room",
+     *     attribute: "temperature",
+     *     value: 21
+     * }).then(
+     *     (response) => {
+     *         // Entity value replaced successfully
+     *         // response.value entity value
+     *         // response.correlator transaction id associated with the server response
+     *     }, (error) => {
+     *         // Error replacing attribute value
+     *         // If the error was reported by Orion, error.correlator will be
+     *         // filled with the associated transaction id
+     *     }
+     * );
+     *
+     */
+    NGSI.Connection.LDV1.prototype.replaceEntityAttributeValue = function replaceEntityAttributeValue(options) {
+        if (options == null) {
+            throw new TypeError("missing options parameter");
+        }
+
+        if (options.id == null) {
+            throw new TypeError("missing id option");
+        } else if (options.attribute == null) {
+            throw new TypeError("missing attribute option");
+        } else if (typeof options.value === "undefined") {
+            throw new TypeError("missing value option");
+        }
+
+        var connection = privates.get(this);
+        var url = new URL(interpolate(
+            NGSI.endpoints.ldv1.ENTITY_ATTR_VALUE_ENTRY, {
+                entityId: encodeURIComponent(options.id),
+                attribute: encodeURIComponent(options.attribute)
+            }
+        ), connection.url);
+        var parameters = {};
+        if (options.type != null) {
+            parameters.type = options.type;
+        }
+
+        // See bug telefonicaid/fiware-orion#2696
+        return makeJSONRequest3.call(connection, url, {
+            method: "PUT",
+            parameters: parameters,
+            postBody: options.value,
+            requestHeaders: {
+                "FIWARE-Correlator": options.correlator,
+                "FIWARE-Service": options.service,
+                "FIWARE-ServicePath": options.servicepath
+            }
+        }).then(function (response) {
+            var correlator = response.getHeader('Fiware-correlator');
+            if (response.status === 400) {
+                return parse_bad_request(response, correlator);
+            } else if (response.status === 409) {
+                return parse_too_many_results(response, correlator);
+            } else if (response.status === 404) {
+                return parse_not_found_response(response, correlator);
+            } else if (response.status !== 204) {
+                return Promise.reject(new NGSI.InvalidResponseError('Unexpected error code: ' + response.status, correlator));
+            }
+            return Promise.resolve({
+                correlator: correlator,
+                value: options.value
+            });
+        });
+    };
+
+    /**
+     * Retrieves the available subscriptions (using pagination).
+     *
+     * > This method uses NGSI-LD API of ETSI ISG CIM
+     *
+     * @since 1.4.0
+     *
+     * @name NGSI.Connection#ldv1.listSubscriptions
+     * @method "ldv1.listSubscriptions"
+     * @memberof NGSI.Connection
+     *
+     * @param {Object} [options]
+     *
+     * Object with extra options:
+     *
+     * - `correlator` (`String`): Transaction id
+     * - `count` (`Boolean`; default: `false`): request total count
+     * - `limit` (`Number`; default: `20`): This option allow you to specify
+     *   the maximum number of subscriptions you want to receive from the
+     *   server
+     * - `offset` (`Number`; default: `0`): Allows you to skip a given
+     *   number of elements at the beginning
+     * - `service` (`String`): Service/tenant to use in this operation
+     * - `servicepath` (`String`): Service path to use in this operation
+     *
+     * @throws {NGSI.ConnectionError}
+     * @throws {NGSI.InvalidResponseError}
+     *
+     * @returns {Promise}
+     *
+     * @example <caption>Retrieve first 20 subscriptions from the Context Broker</caption>
+     *
+     * connection.ldv1.listSubscriptions().then(
+     *     (response) => {
+     *         // Subscriptions retrieved successfully
+     *         // response.results is an array with the retrieved subscriptions
+     *     }, (error) => {
+     *         // Error retrieving subscriptions
+     *         // If the error was reported by Orion, error.correlator will be
+     *         // filled with the associated transaction id
+     *     }
+     * );
+     *
+     * @example <caption>Retrieve second page from the Context Broker requesting pagination details</caption>
+     *
+     * connection.ldv1.listSubscriptions({offset: 20, details: true}).then(
+     *     (response) => {
+     *         // Subscriptions retrieved successfully
+     *         // response.correlator transaction id associated with the server response
+     *         // response.limit contains the used page size
+     *         // response.results is an array with the retrieved subscriptions
+     *         // response.count contains the number of available subscriptions
+     *         // response.offset contains the offset used in the request
+     *     }, (error) => {
+     *         // Error retrieving subscriptions
+     *         // If the error was reported by Orion, error.correlator will be
+     *         // filled with the associated transaction id
+     *     }
+     * );
+     *
+     */
+    NGSI.Connection.LDV1.prototype.listSubscriptions = function listSubscriptions(options) {
+        if (options == null) {
+            options = {};
+        }
+
+        var connection = privates.get(this);
+        var url = new URL(NGSI.endpoints.ldv1.SUBSCRIPTION_COLLECTION, connection.url);
+        var optionsparams = [];
+        var parameters = parse_pagination_options2(options, optionsparams);
+
+        if (optionsparams.length !== 0) {
+            parameters.options = optionsparams.join(',');
+        }
+
+        return makeJSONRequest3.call(connection, url, {
+            method: "GET",
+            parameters: parameters,
+            requestHeaders: {
+                "FIWARE-Correlator": options.correlator,
+                "FIWARE-Service": options.service,
+                "FIWARE-ServicePath": options.servicepath
+            }
+        }).then(function (response) {
+            var correlator = response.getHeader('Fiware-correlator');
+            if (response.status !== 200) {
+                return Promise.reject(new NGSI.InvalidResponseError('Unexpected error code: ' + response.status, correlator));
+            }
+
+            var result = {
+                correlator: correlator,
+                limit: options.limit,
+                offset: options.offset,
+                results: JSON.parse(response.responseText),
+            };
+            if (options.count === true) {
+                result.count = parseInt(response.getHeader("Fiware-Total-Count"), 10);
+            }
+
+            return Promise.resolve(result);
+        });
+    };
+
+    /**
+     * Creates a new subscription.
+     *
+     * > This method uses NGSI-LD API of ETSI ISG CIM
+     *
+     * @since 1.4.0
+     *
+     * @name NGSI.Connection#ldv1.createSubscription
+     * @method "ldv1.createSubscription"
+     * @memberof NGSI.Connection
+     *
+     * @param {Object}
+     *
+     * subscription values to be used for creating it
+     *
+     * @param {Object} [options]
+     *
+     * Object with extra options:
+     * - `skipInitialNotification` (`Boolean`; Default: `false`): Skip Initial Context Broker notification
+     * - `correlator` (`String`): Transaction id
+     * - `service` (`String`): Service/tenant to use in this operation
+     * - `servicepath` (`String`): Service path to use in this operation
+     *
+     * @throws {NGSI.BadRequestError}
+     * @throws {NGSI.ConnectionError}
+     * @throws {NGSI.InvalidResponseError}
+     *
+     * @returns {Promise}
+     *
+     * @example <caption>Basic usage</caption>
+     *
+     * connection.ldv1.createSubscription({
+     *    "description": "One subscription to rule them all",
+     *    "subject": {
+     *        "entities": [
+     *            {
+     *                "idPattern": ".*",
+     *                "type": "Room"
+     *            }
+     *        ],
+     *        "condition": {
+     *            "attrs": [
+     *                "temperature"
+     *            ],
+     *            "expression": {
+     *                "q": "temperature>40"
+     *            }
+     *        }
+     *    },
+     *    "notification": {
+     *        "http": {
+     *            "url": "http://localhost:1234"
+     *        },
+     *        "attrs": [
+     *            "temperature",
+     *            "humidity"
+     *        ]
+     *    },
+     *    "expires": "2016-04-05T14:00:00.00Z",
+     *    "throttling": 5
+     * }).then(
+     *     (response) => {
+     *         // Subscription created successfully
+     *         // response.correlator transaction id associated with the server response
+     *     }, (error) => {
+     *         // Error creating the subscription
+     *         // If the error was reported by Orion, error.correlator will be
+     *         // filled with the associated transaction id
+     *     }
+     * );
+     *
+     * @example <caption>Creating a subscription using a callback</caption>
+     *
+     * connection.ldv1.createSubscription({
+     *    "description": "One subscription to rule them all",
+     *    "subject": {
+     *        "entities": [
+     *            {
+     *                "idPattern": ".*",
+     *                "type": "Room"
+     *            }
+     *        ],
+     *        "condition": {
+     *            "attrs": [
+     *                "temperature"
+     *            ],
+     *            "expression": {
+     *                "q": "temperature>40"
+     *            }
+     *        }
+     *    },
+     *    "notification": {
+     *        "callback": function (notification, headers, error) {
+     *            // notification.attrsformat provides information about the format used by notification.data
+     *            // notification.data contains the modified entities
+     *            // notification.subscriptionId provides the associated subscription id
+     *            // etc...
+     *
+     *            // In case of disconnection from the ngsi-proxy, this method
+     *            // will be called with error = true and notification and
+     *            // header being null
+     *        },
+     *        "attrs": [
+     *            "temperature",
+     *            "humidity"
+     *        ]
+     *    },
+     *    "expires": "2016-04-05T14:00:00.00Z",
+     *    "throttling": 5
+     * }).then(
+     *     (response) => {
+     *         // Subscription created successfully
+     *         // response.correlator transaction id associated with the server response
+     *     }, (error) => {
+     *         // Error creating the subscription
+     *         // If the error was reported by Orion, error.correlator will be
+     *         // filled with the associated transaction id
+     *     }
+     * );
+     *
+     */
+    NGSI.Connection.LDV1.prototype.createSubscription = function createSubscription(subscription, options) {
+        var p, proxy_callback;
+        var connection = privates.get(this);
+
+        if (options == null) {
+            options = {};
+        }
+
+        if (typeof subscription !== 'object') {
+            throw new TypeError('invalid subscription parameter');
+        }
+
+        if ('callback' in subscription.notification) {
+            if (typeof subscription.notification.callback !== "function") {
+                throw new TypeError('invalid callback configuration');
+            }
+
+            var onNotify = function onNotify(payload, headers) {
+                var notification = JSON.parse(payload);
+                notification.attrsformat = headers['ngsiv2-attrsformat'];
+                this(notification);
+            }.bind(subscription.notification.callback);
+
+            p = connection.ngsi_proxy.requestCallback(onNotify).then(
+                function (response) {
+                    proxy_callback = response;
+                    delete subscription.notification.callback;
+                    subscription.notification.http = {
+                        url: proxy_callback.url
+                    };
+                }
+            );
+        } else {
+            p = Promise.resolve();
+        }
+
+        var parameters = {};
+        if (options.skipInitialNotification === true) {
+            parameters.options = "skipInitialNotification";
+        }
+
+        var url = new URL(NGSI.endpoints.ldv1.SUBSCRIPTION_COLLECTION, connection.url);
+        return p.then(function () {
+            return makeJSONRequest3.call(connection, url, {
+                method: "POST",
+                postBody: subscription,
+                parameters: parameters,
+                requestHeaders: {
+                    "FIWARE-Correlator": options.correlator,
+                    "FIWARE-Service": options.service,
+                    "FIWARE-ServicePath": options.servicepath
+                }
+            });
+        }).then(function (response) {
+            var correlator = response.getHeader('Fiware-correlator');
+            if (response.status === 400) {
+                return parse_bad_request(response, correlator);
+            } else if (response.status !== 201) {
+                return Promise.reject(new NGSI.InvalidResponseError('Unexpected error code: ' + response.status, correlator));
+            }
+
+            var location_header = response.getHeader('Location');
+            try {
+                var subscription_url = new URL(location_header, connection.url);
+                var subscription_id = subscription_url.pathname.split('/').pop();
+                subscription.id = subscription_id;
+            } catch (e) {
+                return Promise.reject(new NGSI.InvalidResponseError('Unexpected location header: ' + location_header, correlator));
+            }
+
+            if (proxy_callback) {
+                this.ngsi_proxy.associateSubscriptionId(proxy_callback.callback_id, subscription_id, "v2");
+            }
+
+            return Promise.resolve({
+                correlator: correlator,
+                subscription: subscription,
+                location: location_header
+            });
+        }.bind(connection), function (error) {
+            if (proxy_callback) {
+                this.ngsi_proxy.closeCallback(proxy_callback.callback_id);
+            }
+            return Promise.reject(error);
+        }.bind(connection));
+    };
+
+    /**
+     * Gets all the details of a subscription.
+     *
+     * > This method uses NGSI-LD API of ETSI ISG CIM
+     *
+     * @since 1.4.0
+     *
+     * @name NGSI.Connection#ldv1.getSubscription
+     * @method "ldv1.getSubscription"
+     * @memberof NGSI.Connection
+     *
+     * @param {String|Object} options
+     *
+     * Object with extra options:
+     *
+     * - `correlator` (`String`): Transaction id
+     * - `service` (`String`): Service/tenant to use in this operation
+     * - `servicepath` (`String`): Service path to use in this operation
+     *
+     * @throws {NGSI.ConnectionError}
+     * @throws {NGSI.InvalidResponseError}
+     * @throws {NGSI.NotFoundError}
+     *
+     * @returns {Promise}
+     *
+     * @example <caption>Basic usage</caption>
+     *
+     * connection.ldv1.getSubscription("abcdef").then(
+     *     (response) => {
+     *         // Subscription details retrieved successfully
+     *         // response.subscription subscription details
+     *         // response.correlator transaction id associated with the server response
+     *     }, (error) => {
+     *         // Error retrieving subscription
+     *         // If the error was reported by Orion, error.correlator will be
+     *         // filled with the associated transaction id
+     *     }
+     * );
+     *
+     */
+    NGSI.Connection.LDV1.prototype.getSubscription = function getSubscription(options) {
+        if (options == null) {
+            throw new TypeError("missing options parameter");
+        }
+
+        if (typeof options === "string") {
+            options = {
+                id: options
+            };
+        }
+
+        var connection = privates.get(this);
+        var url = new URL(interpolate(NGSI.endpoints.ldv1.SUBSCRIPTION_ENTRY, {subscriptionId: encodeURIComponent(options.id)}), connection.url);
+
+        return makeJSONRequest3.call(connection, url, {
+            method: "GET",
+            requestHeaders: {
+                "FIWARE-Correlator": options.correlator,
+                "FIWARE-Service": options.service,
+                "FIWARE-ServicePath": options.servicepath
+            }
+        }).then(function (response) {
+            var correlator = response.getHeader('Fiware-correlator');
+            if (response.status === 404) {
+                return parse_not_found_response(response, correlator);
+            } else if (response.status !== 200) {
+                return Promise.reject(new NGSI.InvalidResponseError('Unexpected error code: ' + response.status, correlator));
+            }
+            try {
+                var data = JSON.parse(response.responseText);
+            } catch (e) {
+                throw new NGSI.InvalidResponseError('Server returned invalid JSON content', correlator);
+            }
+            return Promise.resolve({
+                correlator: correlator,
+                subscription: data
+            });
+        });
+    };
+
+    /**
+     * Updates a subscription.
+     *
+     * > This method uses NGSI-LD API of ETSI ISG CIM
+     *
+     * @since 1.4.0
+     *
+     * @name NGSI.Connection#ldv1.updateSubscription
+     * @method "ldv1.updateSubscription"
+     * @memberof NGSI.Connection
+     *
+     * @param {Object} changes
+     * @param {Object} [options]
+     *
+     * Object with extra options:
+     *
+     * - `correlator` (`String`): Transaction id
+     * - `service` (`String`): Service/tenant to use in this operation
+     * - `servicepath` (`String`): Service path to use in this operation
+     *
+     * @throws {NGSI.ConnectionError}
+     * @throws {NGSI.InvalidResponseError}
+     * @throws {NGSI.NotFoundError}
+     *
+     * @returns {Promise}
+     *
+     * @example <caption>Update subscription expiration time</caption>
+     *
+     * connection.ldv1.updateSubscription({
+     *     "id": "abcdef",
+     *     "expires": "2016-04-05T14:00:00.00Z"
+     * }).then(
+     *     (response) => {
+     *         // Subscription updated successfully
+     *         // response.correlator transaction id associated with the server response
+     *     }, (error) => {
+     *         // Error updating subscription
+     *         // If the error was reported by Orion, error.correlator will be
+     *         // filled with the associated transaction id
+     *     }
+     * );
+     *
+     * @example <caption>Use a custom service path for the update operation</caption>
+     *
+     * connection.ldv1.updateSubscription({
+     *     "id": "abcdef",
+     *     "expires": "2016-04-05T14:00:00.00Z"
+     * }, {
+     *     servicepath: "/Spain/Madrid"
+     * }).then(
+     *     (response) => {
+     *         // Subscription updated successfully
+     *         // response.correlator transaction id associated with the server response
+     *     }, (error) => {
+     *         // Error updating subscription
+     *         // If the error was reported by Orion, error.correlator will be
+     *         // filled with the associated transaction id
+     *     }
+     * );
+     *
+     */
+    NGSI.Connection.LDV1.prototype.updateSubscription = function updateSubscription(changes, options) {
+        if (options == null) {
+            options = {};
+        }
+
+        var connection = privates.get(this);
+        var url = new URL(interpolate(NGSI.endpoints.ldv1.SUBSCRIPTION_ENTRY, {subscriptionId: encodeURIComponent(changes.id)}), connection.url);
+
+        // Remove id from the payload
+        delete changes.id;
+
+        return makeJSONRequest3.call(connection, url, {
+            method: "PATCH",
+            postBody: changes,
+            requestHeaders: {
+                "FIWARE-Correlator": options.correlator,
+                "FIWARE-Service": options.service,
+                "FIWARE-ServicePath": options.servicepath
+            }
+        }).then(function (response) {
+            var correlator = response.getHeader('Fiware-correlator');
+            if (response.status === 404) {
+                return parse_not_found_response(response, correlator);
+            } else if (response.status !== 204) {
+                return Promise.reject(new NGSI.InvalidResponseError('Unexpected error code: ' + response.status, correlator));
+            }
+            return Promise.resolve({
+                correlator: correlator
+            });
+        });
+    };
+
+    /**
+     * Removes a subscription from the orion context broker server.
+     *
+     * > This method uses NGSI-LD API of ETSI ISG CIM
+     *
+     * @since 1.4.0
+     *
+     * @name NGSI.Connection#ldv1.deleteSubscription
+     * @method "ldv1.deleteSubscription"
+     * @memberof NGSI.Connection
+     *
+     * @param {String|Object} options
+     *
+     * String with the id of the subscription to remove or an object with
+     * options:
+     *
+     * - `correlator` (`String`): Transaction id
+     * - `id` (`String`): Id of the subscription to remove
+     * - `service` (`String`): Service/tenant to use in this operation
+     * - `servicepath` (`String`): Service path to use in this operation
+     *
+     * @throws {NGSI.ConnectionError}
+     * @throws {NGSI.InvalidResponseError}
+     * @throws {NGSI.NotFoundError}
+     *
+     * @returns {Promise}
+     *
+     * @example
+     *
+     * connection.ldv1.deleteSubscription("57f7787a5f817988e4eb3dda").then(
+     *     (response) => {
+     *         // Subscription deleted successfully
+     *         // response.correlator transaction id associated with the server response
+     *     }, (error) => {
+     *         // Error deleting subscription
+     *         // If the error was reported by Orion, error.correlator will be
+     *         // filled with the associated transaction id
+     *     }
+     * );
+     */
+    NGSI.Connection.LDV1.prototype.deleteSubscription = function deleteSubscription(options) {
+        if (options == null) {
+            throw new TypeError("missing options parameter");
+        }
+
+        if (typeof options === "string") {
+            options = {
+                id: options
+            };
+        }
+
+        var connection = privates.get(this);
+        var url = new URL(interpolate(NGSI.endpoints.ldv1.SUBSCRIPTION_ENTRY, {subscriptionId: encodeURIComponent(options.id)}), connection.url);
+
+        return makeJSONRequest3.call(connection, url, {
+            method: "DELETE",
+            requestHeaders: {
+                "FIWARE-Correlator": options.correlator,
+                "FIWARE-Service": options.service,
+                "FIWARE-ServicePath": options.servicepath
+            }
+        }).then(function (response) {
+            var correlator = response.getHeader('Fiware-correlator');
+            if (response.status === 404) {
+                return parse_not_found_response(response, correlator);
+            } else if (response.status !== 204) {
+                return Promise.reject(new NGSI.InvalidResponseError('Unexpected error code: ' + response.status, correlator));
+            }
+            return Promise.resolve({
+                correlator: correlator
+            });
+        });
+    };
+
+    /**
+     * Retrieves the available registrations (using pagination).
+     *
+     * > This method uses NGSI-LD API of ETSI ISG CIM
+     *
+     * @since 1.3.0
+     *
+     * @name NGSI.Connection#ldv1.listRegistrations
+     * @method "ldv1.listRegistrations"
+     * @memberof NGSI.Connection
+     *
+     * @param {Object} [options]
+     *
+     * Object with extra options:
+     *
+     * - `correlator` (`String`): Transaction id
+     * - `count` (`Boolean`; default: `false`): request total count
+     * - `limit` (`Number`; default: `20`): This option allow you to specify
+     *   the maximum number of registrations you want to receive from the
+     *   server
+     * - `offset` (`Number`; default: `0`): Allows you to skip a given
+     *   number of elements at the beginning
+     * - `service` (`String`): Service/tenant to use in this operation
+     * - `servicepath` (`String`): Service path to use in this operation
+     *
+     * @throws {NGSI.ConnectionError}
+     * @throws {NGSI.InvalidResponseError}
+     *
+     * @returns {Promise}
+     *
+     * @example <caption>Retrieve first 20 registrations from the Context Broker</caption>
+     *
+     * connection.ldv1.listRegistrations().then(
+     *     (response) => {
+     *         // Registrations retrieved successfully
+     *         // response.results is an array with the retrieved registrations
+     *     }, (error) => {
+     *         // Error retrieving registrations
+     *         // If the error was reported by Orion, error.correlator will be
+     *         // filled with the associated transaction id
+     *     }
+     * );
+     *
+     * @example <caption>Retrieve second page from the Context Broker requesting pagination details</caption>
+     *
+     * connection.ldv1.listRegistrations({offset: 20, count: true}).then(
+     *     (response) => {
+     *         // Registrations retrieved successfully
+     *         // response.correlator transaction id associated with the server response
+     *         // response.limit contains the used page size
+     *         // response.results is an array with the retrieved registrations
+     *         // response.count contains the number of available registrations
+     *         // response.offset contains the offset used in the request
+     *     }, (error) => {
+     *         // Error retrieving registrations
+     *         // If the error was reported by Orion, error.correlator will be
+     *         // filled with the associated transaction id
+     *     }
+     * );
+     *
+     */
+    NGSI.Connection.LDV1.prototype.listRegistrations = function listRegistrations(options) {
+        if (options == null) {
+            options = {};
+        }
+
+        var connection = privates.get(this);
+        var url = new URL(NGSI.endpoints.ldv1.REGISTRATION_COLLECTION, connection.url);
+        var optionsparams = [];
+        var parameters = parse_pagination_options2(options, optionsparams);
+
+        if (optionsparams.length !== 0) {
+            parameters.options = optionsparams.join(',');
+        }
+
+        return makeJSONRequest3.call(connection, url, {
+            method: "GET",
+            parameters: parameters,
+            requestHeaders: {
+                "FIWARE-Correlator": options.correlator,
+                "FIWARE-Service": options.service,
+                "FIWARE-ServicePath": options.servicepath
+            }
+        }).then(function (response) {
+            var correlator = response.getHeader('Fiware-correlator');
+            if (response.status !== 200) {
+                return Promise.reject(new NGSI.InvalidResponseError('Unexpected error code: ' + response.status, correlator));
+            }
+
+            var result = {
+                correlator: correlator,
+                limit: options.limit,
+                offset: options.offset,
+                results: JSON.parse(response.responseText),
+            };
+            if (options.count === true) {
+                result.count = parseInt(response.getHeader("Fiware-Total-Count"), 10);
+            }
+
+            return Promise.resolve(result);
+        });
+    };
+
+    /**
+     * Creates a new registration.
+     *
+     * > This method uses NGSI-LD API of ETSI ISG CIM
+     *
+     * @since 1.3.0
+     *
+     * @name NGSI.Connection#ldv1.createRegistration
+     * @method "ldv1.createRegistration"
+     * @memberof NGSI.Connection
+     *
+     * @param {Object}
+     *
+     * registration values to be used for creating it
+     *
+     * @param {Object} [options]
+     *
+     * Object with extra options:
+     * - `correlator` (`String`): Transaction id
+     * - `service` (`String`): Service/tenant to use in this operation
+     * - `servicepath` (`String`): Service path to use in this operation
+     *
+     * @throws {NGSI.BadRequestError}
+     * @throws {NGSI.ConnectionError}
+     * @throws {NGSI.InvalidResponseError}
+     *
+     * @returns {Promise}
+     *
+     * @example <caption>Basic usage</caption>
+     *
+     * connection.ldv1.createRegistration({
+     *    "description": "One registration to rule them all",
+     *    "dataProvided": {
+     *      "entities": [
+     *        {
+     *          "id": "room1",
+     *          "type": "Room"
+     *        }
+     *      ],
+     *      "attrs": [
+     *        "temperature",
+     *        "humidity"
+     *      ]
+     *    },
+     *    "provider": {
+     *      "http": {
+     *        "url": "http://localhost:1234"
+     *      },
+     *      "legacyForwarding": true,
+     *      "supportedForwardingMode": "all"
+     *    }
+     * }).then(
+     *     (response) => {
+     *         // Registration created successfully
+     *         // response.correlator transaction id associated with the server response
+     *     }, (error) => {
+     *         // Error creating the registration
+     *         // If the error was reported by Orion, error.correlator will be
+     *         // filled with the associated transaction id
+     *     }
+     * );
+     *
+     */
+    NGSI.Connection.LDV1.prototype.createRegistration = function createRegistration(registration, options) {
+        if (options == null) {
+            options = {};
+        }
+
+        if (typeof registration !== 'object' || Array.isArray(registration)) {
+            throw new TypeError('invalid registration parameter');
+        }
+
+        var connection = privates.get(this);
+        var url = new URL(NGSI.endpoints.ldv1.REGISTRATION_COLLECTION, connection.url);
+
+        return makeJSONRequest3.call(connection, url, {
+            method: "POST",
+            postBody: registration,
+            requestHeaders: {
+                "FIWARE-Correlator": options.correlator,
+                "FIWARE-Service": options.service,
+                "FIWARE-ServicePath": options.servicepath
+            }
+        }).then(function (response) {
+            var correlator = response.getHeader('Fiware-correlator');
+            if (response.status === 400) {
+                return parse_bad_request(response, correlator);
+            } else if (response.status !== 201) {
+                return Promise.reject(new NGSI.InvalidResponseError('Unexpected error code: ' + response.status, correlator));
+            }
+
+            var location_header = response.getHeader('Location');
+            try {
+                var registration_url = new URL(location_header, connection.url);
+                var registration_id = registration_url.pathname.split('/').pop();
+                registration.id = registration_id;
+            } catch (e) {
+                return Promise.reject(new NGSI.InvalidResponseError('Unexpected location header: ' + location_header, correlator));
+            }
+
+            return Promise.resolve({
+                correlator: correlator,
+                registration: registration,
+                location: location_header
+            });
+        });
+    };
+
+    /**
+     * Gets all the details of a registration.
+     *
+     * > This method uses NGSI-LD API of ETSI ISG CIM
+     *
+     * @since 1.3.0
+     *
+     * @name NGSI.Connection#ldv1.getRegistration
+     * @method "ldv1.getRegistration"
+     * @memberof NGSI.Connection
+     *
+     * @param {String|Object} options
+     *
+     * Object with extra options:
+     *
+     * - `correlator` (`String`): Transaction id
+     * - `service` (`String`): Service/tenant to use in this operation
+     * - `servicepath` (`String`): Service path to use in this operation
+     *
+     * @throws {NGSI.ConnectionError}
+     * @throws {NGSI.InvalidResponseError}
+     * @throws {NGSI.NotFoundError}
+     *
+     * @returns {Promise}
+     *
+     * @example <caption>Basic usage</caption>
+     *
+     * connection.ldv1.getRegistration("abcdef").then(
+     *     (response) => {
+     *         // Registration details retrieved successfully
+     *         // response.registration registration details
+     *         // response.correlator transaction id associated with the server response
+     *     }, (error) => {
+     *         // Error retrieving registration
+     *         // If the error was reported by Orion, error.correlator will be
+     *         // filled with the associated transaction id
+     *     }
+     * );
+     *
+     */
+    NGSI.Connection.LDV1.prototype.getRegistration = function getRegistration(options) {
+        if (options == null) {
+            throw new TypeError("missing options parameter");
+        }
+
+        if (typeof options === "string") {
+            options = {
+                id: options
+            };
+        }
+
+        var connection = privates.get(this);
+        var url = new URL(interpolate(NGSI.endpoints.ldv1.REGISTRATION_ENTRY, {registrationId: encodeURIComponent(options.id)}), connection.url);
+
+        return makeJSONRequest3.call(connection, url, {
+            method: "GET",
+            requestHeaders: {
+                "FIWARE-Correlator": options.correlator,
+                "FIWARE-Service": options.service,
+                "FIWARE-ServicePath": options.servicepath
+            }
+        }).then(function (response) {
+            var correlator = response.getHeader('Fiware-correlator');
+            if (response.status === 404) {
+                return parse_not_found_response(response, correlator);
+            } else if (response.status !== 200) {
+                return Promise.reject(new NGSI.InvalidResponseError('Unexpected error code: ' + response.status, correlator));
+            }
+            try {
+                var data = JSON.parse(response.responseText);
+            } catch (e) {
+                throw new NGSI.InvalidResponseError('Server returned invalid JSON content', correlator);
+            }
+            return Promise.resolve({
+                correlator: correlator,
+                registration: data
+            });
+        });
+    };
+
+    /**
+     * Updates a registration.
+     *
+     * > This method uses NGSI-LD API of ETSI ISG CIM
+     *
+     * @since 1.3.0
+     *
+     * @name NGSI.Connection#ldv1.updateRegistration
+     * @method "ldv1.updateRegistration"
+     * @memberof NGSI.Connection
+     *
+     * @param {Object} changes
+     * @param {Object} [options]
+     *
+     * Object with extra options:
+     *
+     * - `correlator` (`String`): Transaction id
+     * - `service` (`String`): Service/tenant to use in this operation
+     * - `servicepath` (`String`): Service path to use in this operation
+     *
+     * @throws {NGSI.ConnectionError}
+     * @throws {NGSI.InvalidResponseError}
+     * @throws {NGSI.NotFoundError}
+     *
+     * @returns {Promise}
+     *
+     * @example <caption>Update registration expiration time</caption>
+     *
+     * connection.ldv1.updateRegistration({
+     *     "id": "abcdef",
+     *     "description": "Context Source"
+     * }).then(
+     *     (response) => {
+     *         // Registration updated successfully
+     *         // response.correlator transaction id associated with the server response
+     *     }, (error) => {
+     *         // Error updating registration
+     *         // If the error was reported by Orion, error.correlator will be
+     *         // filled with the associated transaction id
+     *     }
+     * );
+     *
+     * @example <caption>Use a custom service path for the update operation</caption>
+     *
+     * connection.ldv1.updateRegistration({
+     *     "id": "abcdef",
+     *     "description": "Context Source"
+     * }, {
+     *     servicepath: "/Spain/Madrid"
+     * }).then(
+     *     (response) => {
+     *         // Registration updated successfully
+     *         // response.correlator transaction id associated with the server response
+     *     }, (error) => {
+     *         // Error updating registration
+     *         // If the error was reported by Orion, error.correlator will be
+     *         // filled with the associated transaction id
+     *     }
+     * );
+     *
+     * Note: PATCH /v2/registration/<id> is not implemented in FIWARE Orion 2.3
+     *       See https://fiware-orion.readthedocs.io/en/master/user/ngsiv2_implementation_notes/index.html#registrations,
+     *           https://github.com/telefonicaid/fiware-orion/issues/3007
+     *
+     */
+    NGSI.Connection.LDV1.prototype.updateRegistration = function updateRegistration(changes, options) {
+        if (options == null) {
+            options = {};
+        }
+
+        var connection = privates.get(this);
+        var url = new URL(interpolate(NGSI.endpoints.ldv1.REGISTRATION_ENTRY, {registrationId: encodeURIComponent(changes.id)}), connection.url);
+
+        // Remove id from the payload
+        delete changes.id;
+
+        return makeJSONRequest3.call(connection, url, {
+            method: "PATCH",
+            postBody: changes,
+            requestHeaders: {
+                "FIWARE-Correlator": options.correlator,
+                "FIWARE-Service": options.service,
+                "FIWARE-ServicePath": options.servicepath
+            }
+        }).then(function (response) {
+            var correlator = response.getHeader('Fiware-correlator');
+            if (response.status === 404) {
+                return parse_not_found_response(response, correlator);
+            } else if (response.status !== 204) {
+                return Promise.reject(new NGSI.InvalidResponseError('Unexpected error code: ' + response.status, correlator));
+            }
+            return Promise.resolve({
+                correlator: correlator
+            });
+        });
+    };
+
+    /**
+     * Removes a registration from the orion context broker server.
+     *
+     * > This method uses NGSI-LD API of ETSI ISG CIM
+     *
+     * @since 1.3.0
+     *
+     * @name NGSI.Connection#ldv1.deleteRegistration
+     * @method "ldv1.deleteRegistration"
+     * @memberof NGSI.Connection
+     *
+     * @param {String|Object} options
+     *
+     * String with the id of the registration to remove or an object with
+     * options:
+     *
+     * - `correlator` (`String`): Transaction id
+     * - `id` (`String`): Id of the registration to remove
+     * - `service` (`String`): Service/tenant to use in this operation
+     * - `servicepath` (`String`): Service path to use in this operation
+     *
+     * @throws {NGSI.ConnectionError}
+     * @throws {NGSI.InvalidResponseError}
+     * @throws {NGSI.NotFoundError}
+     *
+     * @returns {Promise}
+     *
+     * @example
+     *
+     * connection.ldv1.deleteRegistration("57f7787a5f817988e4eb3dda").then(
+     *     (response) => {
+     *         // Registration deleted successfully
+     *         // response.correlator transaction id associated with the server response
+     *     }, (error) => {
+     *         // Error deleting registration
+     *         // If the error was reported by Orion, error.correlator will be
+     *         // filled with the associated transaction id
+     *     }
+     * );
+     */
+    NGSI.Connection.LDV1.prototype.deleteRegistration = function deleteRegistration(options) {
+        if (options == null) {
+            throw new TypeError("missing options parameter");
+        }
+
+        if (typeof options === "string") {
+            options = {
+                id: options
+            };
+        }
+
+        var connection = privates.get(this);
+        var url = new URL(interpolate(NGSI.endpoints.ldv1.REGISTRATION_ENTRY, {registrationId: encodeURIComponent(options.id)}), connection.url);
+
+        return makeJSONRequest3.call(connection, url, {
+            method: "DELETE",
+            requestHeaders: {
+                "FIWARE-Correlator": options.correlator,
+                "FIWARE-Service": options.service,
+                "FIWARE-ServicePath": options.servicepath
+            }
+        }).then(function (response) {
+            var correlator = response.getHeader('Fiware-correlator');
+            if (response.status === 404) {
+                return parse_not_found_response(response, correlator);
+            } else if (response.status !== 204) {
+                return Promise.reject(new NGSI.InvalidResponseError('Unexpected error code: ' + response.status, correlator));
+            }
+            return Promise.resolve({
+                correlator: correlator
+            });
+        });
+    };
+
+    /**
+     * This operation allows to create, update and/or delete several entities
+     * in a single batch operation.
+     *
+     * > This method uses NGSI-LD API of ETSI ISG CIM
+     *
+     * @since 1.4.0
+     *
+     * @name NGSI.Connection#ldv1.batchUpdate
+     * @method "ldv1.batchUpdate"
+     * @memberof NGSI.Connection
+     *
+     * @param {Object} changes
+     * @param {Object} [options]
+     *
+     * Object with extra options:
+     *
+     * - `correlator` (`String`): Transaction id
+     * - `keyValues` (`Boolean`; default: `false`): Use flat attributes
+     * - `service` (`String`): Service/tenant to use in this operation
+     * - `servicepath` (`String`): Service path to use in this operation
+     *
+     * @throws {NGSI.BadRequestError}
+     * @throws {NGSI.ConnectionError}
+     * @throws {NGSI.InvalidResponseError}
+     *
+     * @returns {Promise}
+     *
+     * @example <caption>Basic usage</caption>
+     *
+     * connection.ldv1.batchUpdate({
+     *    "actionType": "APPEND",
+     *    "entities": [
+     *        {
+     *            "type": "Room",
+     *            "id": "Bcn-Welt",
+     *            "temperature": {
+     *                "value": 21.7
+     *            },
+     *            "humidity": {
+     *                "value": 60
+     *            }
+     *        },
+     *        {
+     *            "type": "Room",
+     *            "id": "Mad_Aud",
+     *            "temperature": {
+     *                "value": 22.9
+     *            },
+     *            "humidity": {
+     *                "value": 85
+     *            }
+     *        }
+     *    ]
+     * }).then(
+     *     (response) => {
+     *         // Attributes appended successfully
+     *         // response.correlator transaction id associated with the server response
+     *     }, (error) => {
+     *         // Error appending attributes to the entities
+     *         // If the error was reported by Orion, error.correlator will be
+     *         // filled with the associated transaction id
+     *     }
+     * );
+     *
+     */
+    NGSI.Connection.LDV1.prototype.batchUpdate = function batchUpdate(changes, options) {
+        if (options == null) {
+            options = {};
+        }
+
+        if (changes == null) {
+            throw new TypeError("missing changes parameter");
+        }
+
+        var connection = privates.get(this);
+        var url = new URL(interpolate(NGSI.endpoints.ldv1.BATCH_UPDATE_OP), connection.url);
+        var parameters = {};
+
+        if (options.keyValues === true) {
+            parameters.options = "keyValues";
+        }
+
+        return makeJSONRequest3.call(connection, url, {
+            method: "POST",
+            parameters: parameters,
+            postBody: changes,
+            requestHeaders: {
+                "FIWARE-Correlator": options.correlator,
+                "FIWARE-Service": options.service,
+                "FIWARE-ServicePath": options.servicepath
+            }
+        }).then(function (response) {
+            var correlator = response.getHeader('Fiware-correlator');
+            if (response.status === 400) {
+                return parse_bad_request(response, correlator);
+            } else if (response.status !== 204) {
+                return Promise.reject(new NGSI.InvalidResponseError('Unexpected error code: ' + response.status, correlator));
+            }
+            return Promise.resolve({
+                correlator: correlator
+            });
+        });
+    };
+
+    /**
+     * This operation allows to make several entity queries at once.
+     *
+     * > This method uses NGSI-LD API of ETSI ISG CIM
+     *
+     * @since 1.4.0
+     *
+     * @memberof NGSI.Connection
+     * @method "ldv1.batchQuery"
+     * @memberof NGSI.Connection
+     *
+     * @param {Object} query
+     *
+     * Object with the parameters to make the entity queries. Composed of those
+     * attributes:
+     *
+     * - `entities` (`Array`): a list of entites to search for. Each element is
+     *   represented by a JSON object with the following elements:
+     *      - `id` or `idPattern`: Id or pattern of the affected entities. Both
+     *      cannot be used at the same time, but one of them must be present.
+     *      - `type` or `typePattern`: Type or type pattern of the entities total
+     *      search for. Both cannot be used at the same time. If omitted, it
+     *      means "any entity type"
+     * - `attributes` (`Array`): a list of attribute names to search for. If
+     *   omitted, it means "all attributes".
+     * - `metadata` (`Array`): a list of metadata names to include in the
+     *   response. See "Filtering out attributes and metadata" section for more
+     *   detail.
+     *
+     * @param {Object} [options]
+     *
+     * Object with extra options:
+     *
+     * - `correlator` (`String`): Transaction id
+     * - `count` (`Boolean`; default: `false`): Request total count
+     * - `limit` (`Number`; default: `20`): This option allow you to specify
+     *   the maximum number of entities you want to receive from the server
+     * - `offset` (`Number`; default: `0`): Allows you to skip a given number of
+     *   elements at the beginning
+     * - `orderBy` (`String`): Criteria for ordering results
+     * - `service` (`String`): Service/tenant to use in this operation
+     * - `servicepath` (`String`): Service path to use in this operation
+     * - `unique` (`Boolean`): Represent entities as an array of non-repeated
+     *   attribute values.
+     * - `values` (`Boolean`): Represent entities as an array of attribute
+     *   values
+     *
+     * @throws {NGSI.BadRequestError}
+     * @throws {NGSI.ConnectionError}
+     * @throws {NGSI.InvalidResponseError}
+     *
+     * @returns {Promise}
+     *
+     * @example <caption>Retrieve first 20 entities from the Context Broker</caption>
+     *
+     * connection.ldv1.batchQuery({
+     *    "entities": [
+     *        {
+     *            "idPattern": ".*",
+     *            "type": "myFooType"
+     *        },
+     *        {
+     *            "id": "myBar",
+     *            "type": "myBarType"
+     *        }
+     *    ],
+     *    "attributes": [
+     *        "temperature",
+     *        "humidity"
+     *    ]
+     * }).then(
+     *     (response) => {
+     *         // Entities retrieved successfully
+     *         // response.correlator transaction id associated with the server response
+     *         // response.limit contains the used page size
+     *         // response.results is an array with the retrieved entities
+     *         // response.offset contains the offset used in the request
+     *     }, (error) => {
+     *         // Error retrieving entities
+     *         // If the error was reported by Orion, error.correlator will be
+     *         // filled with the associated transaction id
+     *     }
+     * );
+     *
+     */
+    NGSI.Connection.LDV1.prototype.batchQuery = function batchQuery(query, options) {
+        if (options == null) {
+            options = {};
+        }
+
+        if (query == null) {
+            query = {'entities': []};
+        } else if (query.entities == null && query.attributes == null) {
+            query.entities = [];
+        }
+
+        var connection = privates.get(this);
+        var url = new URL(NGSI.endpoints.ldv1.BATCH_QUERY_OP, connection.url);
+        var optionsparams = [];
+        var parameters = parse_pagination_options2(options, optionsparams);
+
+        if (options.keyValues === true) {
+            optionsparams.push("keyValues");
+        }
+        if (options.values === true) {
+            optionsparams.push("values");
+        }
+        if (options.unique === true) {
+            optionsparams.push("unique");
+        }
+        if (optionsparams.length > 0) {
+            parameters.options = optionsparams.join(',');
+        }
+
+        parameters.orderBy = options.orderBy;
+
+        return makeJSONRequest3.call(connection, url, {
             method: "POST",
             parameters: parameters,
             postBody: query,

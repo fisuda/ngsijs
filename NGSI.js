@@ -274,7 +274,7 @@
             TYPE_ENTRY: 'v2/types/%(typeId)s'
         },
 
-        v2: {
+        ldv1: {
             BATCH_QUERY_OP: 'ngsi-ld/v1/op/query',
             BATCH_UPDATE_OP: 'ngsi-ld/v1/op/update',
             ENTITY_ATTRS_COLLECTION: 'ngsi-ld/v1/entities/%(entityId)s/attrs',
@@ -1870,8 +1870,8 @@
         Object.defineProperties(this, {
             url: {value: url},
             v1: {value: this},
-            v2: {value: new NGSI.Connection.V2(this)}
-            ldv2: {value: new NGSI.Connection.LDV1(this)}
+            v2: {value: new NGSI.Connection.V2(this)},
+            ldv1: {value: new NGSI.Connection.LDV1(this)}
         });
     };
 
