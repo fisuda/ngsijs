@@ -429,7 +429,7 @@
         }
 
         var requestHeaders = JSON.parse(JSON.stringify(this.headers));
-        requestHeaders.Accept = 'application/json;application/ld+json';
+        requestHeaders.Accept = 'application/json,application/ld+json';
 
         for (var headerName in options.requestHeaders) {
             if (options.requestHeaders[headerName] != null) {
@@ -6068,40 +6068,44 @@
      *
      * Object with extra options:
      *
-     * - `id` (`String`): A comma-separated list of entity ids to retrieve.
-     * - `idPattern` (`String`): A correctly formated regular expression.
-     *   Retrieve entities whose ID matches the regular expression. Incompatible
-     *   with the `id` option
-     * - `type` (`String`): A comma-separated list of entity types to retrieve.
      * - `attrs` (`String`): Comma-separated list of attribute names whose data
      *   are to be included in the response. The attributes are retrieved in the
      *   order specified by this parameter. If this parameter is not included,
      *   the attributes are retrieved in arbitrary order.
-     * - `q` (`String`): A query expression, composed of a list of statements
-     *   separated by semicolons (`;`)
-     * - `georel` (`String`): Spatial relationship between matching entities and
-     * - `geometry` (`String`): Geographical area to which the query is restricted.
-     *   See "Geographical Queries" section in NGSI-LD specification for details.
      * - `coords` (`String`): List of latitude-longitude pairs of coordinates
      *   separated by ';'. See "Geographical Queries" section in NGSI-LD specification
-     *   for details.
-     * - `geoproperty` (`String`): The name of the property that contains the
-     *   geo-spatial data that will be used to resolve the geoquery
-     * - `csf` (`String`): Context Source Filter
-     * - `limit` (`Number`; default: `20`): This option allow you to specify
-     * - 'options' (`String`): Options dictionary
      * - `correlator` (`String`): Transaction id
      * - `count` (`Boolean`; default: `false`): Request total count
      *   Incompatible with the `idPattern` option.
      *   the maximum number of entities you want to receive from the server
+     *   for details.
+     * - `csf` (`String`): Context Source Filter
+     * - `geometry` (`String`): Geographical area to which the query is restricted.
+     *   See "Geographical Queries" section in NGSI-LD specification for details.
+     * - `geoproperty` (`String`): The name of the property that contains the
+     *   geo-spatial data that will be used to resolve the geoquery
+     * - `georel` (`String`): Spatial relationship between matching entities and
+     * - `id` (`String`): A comma-separated list of entity ids to retrieve.
+     * - `idPattern` (`String`): A correctly formated regular expression.
+     *   Retrieve entities whose ID matches the regular expression. Incompatible
+     *   with the `id` option
+     * - `limit` (`Number`; default: `20`): This option allow you to specify
+     * - `metadata` (`String`): A comma-separated list of metadata names to
+     *   include in the response
+     * - `mq` (`String`): A query expression for attribute metadata, composed of
+     *   a list of statements separated by semicolons (`;`)
+     * - 'options' (`String`): Options dictionary
      * - `offset` (`Number`; default: `0`): Allows you to skip a given number of
      *   elements at the beginning
      * - `orderBy` (`String`): Criteria for ordering results
      *   a reference shape. See "Geographical Queries" section in NGSI-LD specification
      *   for details.
+     * - `q` (`String`): A query expression, composed of a list of statements
+     *   separated by semicolons (`;`)
      * - `service` (`String`): Service/tenant to use in this operation
      * - `servicepath` (`String`): Service path to use in this operation
      *   Incompatible with the `typePattern` option.
+     * - `type` (`String`): A comma-separated list of entity types to retrieve.
      * - `typePattern` (`String`): A correctly formated regular expression.
      *   Retrieve entities whose type matches the regular expression.
      *   Incompatible with the `type` option.
@@ -6109,10 +6113,6 @@
      *   attribute values.
      * - `values` (`Boolean`): Represent entities as an array of attribute
      *   values
-     * - `metadata` (`String`): A comma-separated list of metadata names to
-     *   include in the response
-     * - `mq` (`String`): A query expression for attribute metadata, composed of
-     *   a list of statements separated by semicolons (`;`)
      *
      * @throws {NGSI.ConnectionError}
      * @throws {NGSI.InvalidResponseError}
@@ -6193,7 +6193,6 @@
         parameters.coords = options.coords;
         parameters.geoproperty = options.geoproperty;
         parameters.csf = options.csf;
-        parameters.options = options.options;
 
         parameters.orderBy = options.orderBy;
         parameters.metadata = options.metadata;

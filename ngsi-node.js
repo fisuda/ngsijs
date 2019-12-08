@@ -233,6 +233,7 @@ NGSI.Connection = function Connection(url, options) {
 };
 NGSI.Connection.prototype = old_Connection.prototype;
 NGSI.Connection.V2 = old_Connection.V2;
+NGSI.Connection.LDV1 = old_Connection.LDV1;
 
 /* exports */
 for (var key in NGSI) {
