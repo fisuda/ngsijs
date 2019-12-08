@@ -429,7 +429,7 @@
         }
 
         var requestHeaders = JSON.parse(JSON.stringify(this.headers));
-        requestHeaders.Accept = 'application/json;application/ld+json';
+        requestHeaders.Accept = 'application/json,application/ld+json';
 
         for (var headerName in options.requestHeaders) {
             if (options.requestHeaders[headerName] != null) {
